@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portfolio-monitor"
+version = "0.1.0"
+description = "Local-first portfolio monitoring for U.S. and India investors"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Portfolio Monitor Contributors" }]
+license = { text = "MIT" }
+dependencies = [
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+excel = [
+  "openpyxl>=3.1.2",
+]
+pdf = [
+  "pdfplumber>=0.11.0",
+]
+market = [
+  "yfinance>=0.2.40",
+]
+
+[project.scripts]
+portfolio-monitor = "portfolio_monitor.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,27 @@
+database_path: data/portfolio.db
+report_dir: reports
+base_currency: USD
+
+risk_profile:
+  name: moderate_growth
+  max_single_stock_pct: 10
+  max_crypto_pct: 10
+  watch_single_stock_pct: 7
+  target_allocations:
+    etf: 70
+    stock: 20
+    crypto: 5
+    cash: 5
+
+benchmarks:
+  US: SPY
+  IN: NIFTYBEES.NS
+  CRYPTO: BTC-USD
+
+market_data:
+  provider: yahoo
+  allow_stale_prices: true
+
+reporting:
+  top_movers_limit: 5
+  monthly_underperformance_threshold_pct: -20
