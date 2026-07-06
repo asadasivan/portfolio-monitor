@@ -6,7 +6,6 @@ setup:
 	$(PYTHON) -m venv .venv
 	. .venv/bin/activate && pip install --upgrade pip && pip install -e ".[dev,pdf,excel]"
 	test -f config/user.yaml || cp config/default.yaml config/user.yaml
-	mkdir -p input data reports
 
 test:
 	. .venv/bin/activate && pytest
