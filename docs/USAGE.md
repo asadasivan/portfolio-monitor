@@ -1,6 +1,6 @@
 # AI Assistant Usage Guide
 
-Use Portfolio Monitor through a local AI coding assistant. The assistant sets up the local project, runs the monitoring loop, and produces `reports/latest.html` as the main output.
+Use Portfolio Monitor through a local AI coding assistant. The assistant sets up the local project, runs the monitoring loop, and produces `reports/latest.html` so you can review portfolio value, performance, allocation, data quality, dividends, and risk signals.
 
 ## 1. Create the Project
 
@@ -32,6 +32,7 @@ Run sh scripts/run_daily.sh for the daily loop.
 Summarize:
 - portfolio value
 - daily change
+- overall performance
 - account reconciliation
 - data-quality status
 - risk alerts
@@ -44,7 +45,7 @@ If account reconciliation is needed, ask me for broker-reported totals and the a
 
 Do not read raw statements unless reports/latest.ai.json shows REVIEW_REQUIRED or I ask you to debug ingestion.
 Do not create demo, sample, synthetic, or test portfolio files.
-Do not present the result as investment, tax, legal, or trading advice.
+Do not recommend what to buy, sell, hold, rebalance, or use for tax filing.
 ```
 
 ## Expected Output
@@ -52,7 +53,7 @@ Do not present the result as investment, tax, legal, or trading advice.
 The assistant should provide:
 
 - `reports/latest.html`: the primary user-facing report, with sorting, searching, and filtering.
-- A concise summary of portfolio value, reconciliation, data quality, risk alerts, largest positions, and notable gain/loss changes.
+- A concise summary of portfolio value, performance, reconciliation, data quality, risk alerts, largest positions, and notable gain/loss changes.
 - Any follow-up files or values needed from you, such as manual prices, cost basis, or broker-reported totals.
 
 ## Guardrails

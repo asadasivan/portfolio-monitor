@@ -1,8 +1,8 @@
 # Portfolio Monitor
 
-Portfolio Monitor is a local-first portfolio monitoring tool designed to be run by an AI coding assistant against user-provided brokerage statements or normalized CSV files. It refreshes market prices, stores portfolio state locally, and generates an interactive local HTML report.
+Portfolio Monitor is a local-first portfolio tracking and performance analysis tool designed to be run by an AI coding assistant against user-provided brokerage statements or normalized CSV files. It refreshes market prices, stores portfolio state locally, and generates an interactive local HTML report.
 
-The primary workflow is: create a local project in your AI assistant, place your real portfolio exports under `input/`, ask the assistant to run the monitoring loop, then review `reports/latest.html`.
+The primary workflow is: create a local project in your AI assistant, place your real portfolio exports under `input/`, ask the assistant to run the monitoring loop, then review `reports/latest.html` to understand holdings, allocation, performance, data quality, dividends, and risk signals.
 
 ## What It Does
 
@@ -11,6 +11,7 @@ The primary workflow is: create a local project in your AI assistant, place your
 - Updates prices from Yahoo Finance or a manual price CSV.
 - Tracks account-level reconciliation against broker-reported totals.
 - Calculates market value, gain/loss, allocation, dividend estimates, and concentration risk.
+- Helps analyze investment performance using your own local files.
 - Generates an interactive local HTML report with sorting, searching, and filtering, plus assistant-ready JSON context.
 
 ## What It Does Not Do
@@ -18,7 +19,7 @@ The primary workflow is: create a local project in your AI assistant, place your
 - It does not execute trades.
 - It does not log in to brokerage accounts.
 - It does not scrape broker websites.
-- It does not provide regulated financial, tax, or legal advice.
+- It supports portfolio tracking and performance analysis, but it does not provide investment, tax, legal, or trading advice.
 - It does not perform currency conversion yet.
 
 ## Start Here
@@ -81,9 +82,9 @@ See [Security](SECURITY.md) for the canonical list of sensitive files that must 
 
 - Yahoo Finance data may be delayed, unavailable, or inconsistent with broker quotes.
 - Currency conversion is not implemented.
-- Tax handling is decision support only, not tax filing.
+- Gain/loss and tax-related fields are tracking inputs only, not tax filing guidance.
 - Dividend estimates use imported annual income values when available; they are not guaranteed forecasts.
 
 ## Disclaimer
 
-Portfolio Monitor is educational decision-support software. It is not an investment adviser, broker, tax adviser, or legal adviser. Validate imported data, calculations, and recommendations before making financial decisions.
+Portfolio Monitor is a local portfolio tracking and decision-support tool. It helps you review holdings, performance, allocation, data quality, dividends, and risk signals using your own files. It does not provide investment, tax, legal, or trading advice. Validate imported data and calculations before making financial or tax decisions.

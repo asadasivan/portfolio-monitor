@@ -1,6 +1,6 @@
 # Input Formats
 
-The statement or CSV must contain enough information to establish current holdings.
+The statement or CSV must contain enough information to establish current holdings for local portfolio tracking and performance analysis.
 
 ## Holdings CSV
 

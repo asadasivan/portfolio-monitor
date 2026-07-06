@@ -1,6 +1,6 @@
 # Security Policy
 
-Portfolio Monitor is designed to run locally. It does not require broker credentials and does not send statements to a hosted service.
+Portfolio Monitor is designed to run locally for portfolio tracking and performance analysis. It does not require broker credentials and does not send statements to a hosted service.
 
 ## Supported Use
 
