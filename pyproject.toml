@@ -9,7 +9,7 @@ description = "Local-first portfolio monitoring for U.S. and India investors"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Portfolio Monitor Contributors" }]
-license = { text = "MIT" }
+license = "MIT"
 dependencies = [
 ]
 
@@ -28,8 +28,12 @@ market = [
 ]
 
 [project.scripts]
-portfolio-monitor = "portfolio_monitor.cli:main"
+portfolio-monitor = "app.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]

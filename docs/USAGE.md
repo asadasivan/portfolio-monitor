@@ -1,99 +1,35 @@
-# Usage Guide
+# AI Assistant Usage Guide
 
-## Input Options
+Use Portfolio Monitor through a local AI coding assistant. The assistant sets up the local project, runs the monitoring loop, and produces `reports/latest.html` as the main output.
 
-You can start monitoring in either of these ways:
+## 1. Create the Project
 
-- Place statements or normalized CSV files under `input/` and run `portfolio-monitor ingest input`.
-- Provide files directly to your local assistant and ask it to ingest from those local file paths.
-
-Private files should stay local. Do not commit statements, exports, generated reports, local databases, or screenshots containing account data.
-
-## First Run
-
-Import statements or normalized CSV files:
+In your AI assistant, create or open a local project/workspace. Then ask it to run setup:
 
 ```bash
-portfolio-monitor ingest input
+git clone https://github.com/asadasivan/portfolio-monitor.git && cd portfolio-monitor && make setup
 ```
 
-Refresh prices online:
+## 2. Add Your Files
 
-```bash
-portfolio-monitor refresh-prices
-```
+Add your real brokerage statements or normalized holdings CSV files to `input/`.
 
-If online prices are unavailable, import manual prices:
+Do not create or use demo, sample, synthetic, or test portfolio files for normal monitoring.
 
-```bash
-portfolio-monitor prices input/prices.csv
-```
+## 3. Ask the Assistant to Run the Loop
 
-If cost basis is missing, import a cost basis CSV:
-
-```bash
-portfolio-monitor cost-basis input/cost_basis.csv
-```
-
-Set broker-reported account totals for reconciliation:
-
-```bash
-portfolio-monitor account-value "Fidelity" 100000 --as-of 2026-07-05
-portfolio-monitor account-value "Robinhood" 25000 --as-of 2026-07-05
-```
-
-Generate the daily report:
-
-```bash
-portfolio-monitor analyze --daily
-```
-
-Assistant-friendly summary:
-
-```bash
-portfolio-monitor report --json
-```
-
-## Daily Monitoring
-
-```bash
-portfolio-monitor refresh-prices
-portfolio-monitor analyze --daily
-portfolio-monitor report --json
-```
-
-Review:
+Use this prompt:
 
 ```text
-reports/latest.html
-```
+Run the Portfolio Monitor daily loop using only my real files under input/.
+If input/ is missing or empty, stop and ask me to add brokerage statements or a normalized holdings CSV.
 
-## Monthly Decision Support
+Generate the interactive HTML report and summarize the result.
+The main output should be reports/latest.html with sorting, searching, and filtering.
+Use reports/latest.ai.json only as assistant context for the summary.
+Run sh scripts/run_daily.sh for the daily loop.
 
-```bash
-portfolio-monitor analyze --monthly
-portfolio-monitor report --json
-```
-
-Monthly review should focus on allocation drift, concentration, missing cost basis, account reconciliation gaps, tax-review reminders, dividend estimates, and hold/watch/trim candidates. This is decision support only, not trade instruction.
-
-## Assistant Usage
-
-Expected assistant behavior:
-
-- run commands locally
-- keep private files local
-- use `reports/latest.ai.json` for analysis
-- use `reports/latest.html` for human-readable report references
-- ask for missing account totals or cost basis when needed
-- avoid raw statement injection unless troubleshooting
-- never commit `input/`, `reports/`, `data/*.db`, `.env`, statements, exports, screenshots, or secrets
-
-Recommended daily prompt:
-
-```text
-Run the daily portfolio monitoring loop.
-Refresh prices, generate the daily report, read reports/latest.ai.json, and summarize:
+Summarize:
 - portfolio value
 - daily change
 - account reconciliation
@@ -101,55 +37,26 @@ Refresh prices, generate the daily report, read reports/latest.ai.json, and summ
 - risk alerts
 - largest positions
 - notable gain/loss changes
-Do not read raw statements unless the report says REVIEW_REQUIRED or I ask you to debug ingestion.
+
+If online price refresh fails, ask me for a manual price CSV.
+If cost basis is missing, ask me for a cost basis CSV before relying on gain/loss analysis.
+If account reconciliation is needed, ask me for broker-reported totals and the as-of date.
+
+Do not read raw statements unless reports/latest.ai.json shows REVIEW_REQUIRED or I ask you to debug ingestion.
+Do not create demo, sample, synthetic, or test portfolio files.
+Do not present the result as investment, tax, legal, or trading advice.
 ```
 
-## Reports
+## Expected Output
 
-Daily analysis writes:
+The assistant should provide:
 
-| File | Purpose |
-|---|---|
-| `reports/latest.html` | Human-readable interactive report |
-| `reports/latest.ai.json` | Low-token structured context for assistant analysis |
-| `reports/latest.compact.txt` | Compact text summary |
-| `reports/latest.md` | Full Markdown report |
-| `reports/latest.manifest.json` | Report artifact routing metadata |
+- `reports/latest.html`: the primary user-facing report, with sorting, searching, and filtering.
+- A concise summary of portfolio value, reconciliation, data quality, risk alerts, largest positions, and notable gain/loss changes.
+- Any follow-up files or values needed from you, such as manual prices, cost basis, or broker-reported totals.
 
-The HTML report supports:
+## Guardrails
 
-- search in Holdings Detail and Risk By Holding
-- clickable column sorting
-- multi-column show/hide controls
-- account value reconciliation
-- data-quality findings
-
-## Docker
-
-Build:
-
-```bash
-docker build -t portfolio-monitor:local .
-```
-
-Run with mounted local runtime directories:
-
-```bash
-docker compose run --rm portfolio-monitor ingest input
-docker compose run --rm portfolio-monitor refresh-prices
-docker compose run --rm portfolio-monitor analyze --daily
-```
-
-## Testing
-
-```bash
-pytest
-python -m compileall portfolio_monitor tests
-```
-
-Or:
-
-```bash
-make test
-make compile
-```
+- Use only user-provided real input files.
+- Keep `input/`, `data/`, and `reports/` local.
+- Never commit statements, exports, screenshots, reports, databases, `.env`, or secrets.

@@ -1,6 +1,12 @@
 #!/usr/bin/env sh
 set -eu
 
-PYTHON_BIN="${PYTHON:-python3}"
+if [ -x ".venv/bin/portfolio-monitor" ]; then
+  PORTFOLIO_MONITOR=".venv/bin/portfolio-monitor"
+else
+  PORTFOLIO_MONITOR="portfolio-monitor"
+fi
 
-"$PYTHON_BIN" -m portfolio_monitor.cli analyze --monthly
+"$PORTFOLIO_MONITOR" analyze --monthly
+"$PORTFOLIO_MONITOR" report --json
+printf '\nHTML report: reports/latest.html\n'

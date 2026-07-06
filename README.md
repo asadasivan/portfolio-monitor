@@ -1,8 +1,8 @@
 # Portfolio Monitor
 
-Portfolio Monitor is a local-first portfolio monitoring tool for personal investment tracking. It imports user-provided brokerage statements or normalized CSV files, refreshes market prices, stores portfolio state locally, and generates local HTML and assistant-friendly reports.
+Portfolio Monitor is a local-first portfolio monitoring tool designed to be run by an AI coding assistant against user-provided brokerage statements or normalized CSV files. It refreshes market prices, stores portfolio state locally, and generates an interactive local HTML report.
 
-The project can be run directly from a terminal or with a local coding assistant such as Codex, Claude Code, or ChatGPT.
+The primary workflow is: create a local project in your AI assistant, place your real portfolio exports under `input/`, ask the assistant to run the monitoring loop, then review `reports/latest.html`.
 
 ## What It Does
 
@@ -11,7 +11,7 @@ The project can be run directly from a terminal or with a local coding assistant
 - Updates prices from Yahoo Finance or a manual price CSV.
 - Tracks account-level reconciliation against broker-reported totals.
 - Calculates market value, gain/loss, allocation, dividend estimates, and concentration risk.
-- Generates interactive local HTML reports and compact assistant-ready summaries.
+- Generates an interactive local HTML report with sorting, searching, and filtering, plus assistant-ready JSON context.
 
 ## What It Does Not Do
 
@@ -21,36 +21,33 @@ The project can be run directly from a terminal or with a local coding assistant
 - It does not provide regulated financial, tax, or legal advice.
 - It does not perform currency conversion yet.
 
-## Quick Start
+## Start Here
 
-```bash
-git clone https://github.com/YOUR_USERNAME/portfolio-monitor.git
-cd portfolio-monitor
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -e ".[dev,pdf,excel]"
-cp config/sample.user.yaml config/user.yaml
-```
-
-After installation, follow the [Usage Guide](docs/USAGE.md) to add statements, run daily monitoring, generate reports, or operate the tool with an assistant.
+Use the [AI Assistant Usage Guide](docs/USAGE.md). It contains the setup command, the assistant prompt, and the expected output.
 
 ## Documentation
 
-- [Usage Guide](docs/USAGE.md): daily/monthly workflow, assistant monitoring loop, reports, Docker, and testing.
+- [AI Assistant Usage Guide](docs/USAGE.md): primary AI assistant workflow.
 - [Input Formats](docs/INPUT_FORMATS.md): holdings CSV, manual prices, cost basis, and account reconciliation inputs.
 - [Security](SECURITY.md): privacy model, local data handling, and what must not be committed.
 
 ## Project Structure
 
 ```text
-portfolio_monitor/      application code
-config/                 user configuration template
-docs/                   usage and input format documentation
-input/                  private local statement imports, ignored
-reports/                generated local reports, ignored
-scripts/                local helper scripts
-tests/                  focused unit tests with generated fixtures
+src/app/                 application source
+  domain/                portfolio domain objects
+  ingestion/             CSV, Excel, and PDF input loading
+  analysis/              portfolio calculations and risk signals
+  market_data/           market price provider integration
+  persistence/           local SQLite storage
+  reporting/             HTML, Markdown, compact text, and AI JSON rendering
+config/                  user configuration template; config/user.yaml is local and ignored
+docs/                    usage and input format documentation
+input/                   private local statement imports; contents ignored
+data/                    local SQLite runtime data; contents ignored
+reports/                 generated report output; contents ignored
+scripts/                 assistant-friendly helper scripts
+tests/                   focused unit tests
 ```
 
 ## Public Repository Safety

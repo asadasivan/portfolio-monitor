@@ -5,12 +5,12 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from portfolio_monitor.analysis import build_daily_report, build_monthly_report
-from portfolio_monitor.importers import load_holdings
-from portfolio_monitor.markets import provider_symbol
-from portfolio_monitor.models import Holding
-from portfolio_monitor.reports.compact import render_ai_json, render_compact, render_manifest
-from portfolio_monitor.storage import PortfolioStore
+from app.analysis import build_daily_report, build_monthly_report
+from app.ingestion import load_holdings
+from app.market_data import provider_symbol
+from app.domain.models import Holding
+from app.reporting.compact import render_ai_json, render_compact, render_manifest
+from app.persistence import PortfolioStore
 
 
 def test_csv_import_loads_normalized_holdings(tmp_path: Path) -> None:
