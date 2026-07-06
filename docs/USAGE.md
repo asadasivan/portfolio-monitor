@@ -58,5 +58,4 @@ The assistant should provide:
 ## Guardrails
 
 - Use only user-provided real input files.
-- Keep `input/`, `data/`, and `reports/` local.
-- Never commit statements, exports, screenshots, reports, databases, `.env`, or secrets.
+- Keep private portfolio artifacts local. See [Security](../SECURITY.md) for what must not be committed.

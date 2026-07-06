@@ -25,17 +25,32 @@ Taxable Brokerage,ExampleBroker,US,VTI,Vanguard Total Stock Market ETF,ETF,100,2
 
 ## Cost Basis CSV
 
+Cost basis is required for reliable gain/loss analysis. If the report shows missing cost basis, export cost basis or tax-lot data from the broker and create a CSV under `input/`.
+
+Use either average cost per share/unit:
+
 ```csv
 broker,market,symbol,average_cost
-ExampleBroker,US,AAPL,150.00
+ExampleBroker,US,AAPL,127.26
+ExampleBroker,GLOBAL,BTC,43907.14
 ```
 
-Use `average_cost` for per-share/per-unit average cost, or `cost_basis` for total position cost basis.
+Or total position cost basis:
+
+```csv
+broker,market,symbol,cost_basis
+ExampleBroker,US,AAPL,1275.02
+ExampleBroker,GLOBAL,BTC,4573.03
+```
+
+If multiple accounts hold the same symbol, include `broker` and `market` exactly as shown in the holdings output so the update applies to the intended position.
 
 Import command:
 
 ```bash
+. .venv/bin/activate
 portfolio-monitor cost-basis input/cost_basis.csv
+portfolio-monitor analyze --daily
 ```
 
 ## Manual Price CSV
@@ -55,9 +70,11 @@ portfolio-monitor prices input/prices.csv
 
 ## Account Reconciliation
 
-Use broker-reported account totals to compare the tool's calculated value against the brokerage app or statement.
+Use broker-reported account totals to compare the tool's calculated value against the brokerage app or statement. This does not change holdings; it only adds a control check.
 
 ```bash
-portfolio-monitor account-value "Fidelity" 100000 --as-of 2026-07-05
-portfolio-monitor account-value "Robinhood" 25000 --as-of 2026-07-05
+. .venv/bin/activate
+portfolio-monitor account-value "Brokerage Account" 100000 --as-of 2026-07-06
+portfolio-monitor account-value "Trading Account" 25000 --as-of 2026-07-06
+portfolio-monitor analyze --daily
 ```
