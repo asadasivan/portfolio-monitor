@@ -10,6 +10,7 @@ from app.ingestion import load_holdings
 from app.market_data import provider_symbol
 from app.domain.models import Holding
 from app.reporting.compact import render_ai_json, render_compact, render_manifest
+from app.reporting.html import write_html_report
 from app.persistence import PortfolioStore
 
 
@@ -154,6 +155,44 @@ def test_compact_ai_outputs_are_small_and_structured() -> None:
     assert "low_token_portfolio_analysis_context" in ai_json
     assert "top_holdings=" in compact
     assert len(compact) < 2000
+
+
+def test_html_report_has_interactive_holdings_and_risk_controls(tmp_path: Path) -> None:
+    report = build_daily_report(_holdings(), Decimal("80000"), _config())
+    path = write_html_report(report, tmp_path)
+    html = path.read_text(encoding="utf-8")
+
+    assert (tmp_path / "latest.html").exists()
+    assert "Holdings Detail" in html
+    assert "Risk By Holding" in html
+    assert "Report Checks" in html
+    assert "Run Context" not in html
+    assert "checks-grid" in html
+    assert "Broker total check" in html
+    assert "Price freshness" in html
+    assert "section-account" in html
+    assert "section-asset" in html
+    assert "section-dividend" in html
+    assert "section-disclaimer" in html
+    assert ".issue-tag.warning" in html
+    assert ".issue-tag.info" in html
+    assert html.count("<table data-interactive='true'>") == 2
+    assert 'className = "column-picker"' in html
+    assert 'className = "column-options"' in html
+    assert 'className = "reset-button"' in html
+    assert 'classList.add("sortable")' in html
+    assert "Search this table" in html
+
+
+def test_html_report_shows_all_data_quality_issues(tmp_path: Path) -> None:
+    holdings = [replace(holding, cost_basis=None) for holding in _holdings()]
+    report = build_daily_report(holdings, Decimal("80000"), _config())
+    path = write_html_report(report, tmp_path)
+    html = path.read_text(encoding="utf-8")
+
+    assert "View all issues" in html
+    assert "more issues not shown" not in html
+    assert html.count('class="issue-item severity-info"') == len(holdings)
 
 
 def test_monthly_report_includes_signals() -> None:

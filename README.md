@@ -4,6 +4,57 @@ Portfolio Monitor is a local-first portfolio monitoring tool designed to be run 
 
 The primary workflow is: create a local project in your AI assistant, place your real portfolio exports under `input/`, ask the assistant to run the monitoring loop, then review `reports/latest.html`.
 
+## Report Checks
+
+The HTML report includes compact checks near the top:
+
+- **Broker total check** compares the tool's parsed account value with the total value you see in the broker app or statement. If it says `NOT SET`, no broker-reported totals have been entered yet.
+- **Data quality** summarizes import gaps. `Needs review` means the report found a data issue that may affect trust in the numbers. `Missing optional data` usually means gain/loss or tax-lot analysis is incomplete because cost basis is missing.
+- **Price freshness** tells you whether values are based on stored/imported prices. Refresh prices or import a manual price CSV before relying on current day movement.
+
+## Add Cost Basis
+
+Cost basis is required for reliable gain/loss analysis. If the report shows missing cost basis, export cost basis or tax-lot data from the broker and create a CSV under `input/`.
+
+Use either total position cost basis:
+
+```csv
+broker,market,symbol,cost_basis
+Robinhood,US,AAPL,1275.02
+Robinhood,GLOBAL,BTC,4573.03
+```
+
+Or average cost per share/unit:
+
+```csv
+broker,market,symbol,average_cost
+Robinhood,US,AAPL,127.26
+Robinhood,GLOBAL,BTC,43907.14
+```
+
+Then import it:
+
+```bash
+. .venv/bin/activate
+portfolio-monitor cost-basis input/cost_basis.csv
+portfolio-monitor analyze --daily
+```
+
+If multiple accounts hold the same symbol, include `broker` and `market` exactly as shown in the holdings output so the update applies to the intended position.
+
+## Add Broker Totals
+
+Broker totals let the report reconcile parsed holdings against the account value shown by the broker. Use the total account value from the broker app or statement and its as-of date:
+
+```bash
+. .venv/bin/activate
+portfolio-monitor account-value "Fidelity" 1494398.79 --as-of 2026-07-06
+portfolio-monitor account-value "Robinhood" 59891.52 --as-of 2026-07-06
+portfolio-monitor analyze --daily
+```
+
+This does not change holdings. It only adds a control check so the report can show whether parsed positions approximately match broker-reported account totals.
+
 ## What It Does
 
 - Imports normalized holdings from CSV, Excel, or supported broker PDFs.
