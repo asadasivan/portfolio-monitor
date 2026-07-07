@@ -164,6 +164,8 @@ def test_html_report_has_interactive_holdings_and_risk_controls(tmp_path: Path) 
 
     assert (tmp_path / "latest.html").exists()
     assert "Holdings Detail" in html
+    assert "Last Price" in html
+    assert "250.00" in html
     assert "Risk By Holding" in html
     assert "Report Checks" in html
     assert "Run Context" not in html

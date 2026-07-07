@@ -213,6 +213,7 @@ def _holdings_table(report: dict[str, Any]) -> str:
             + _td(holding.get("account", ""))
             + _td(holding.get("asset_type", ""))
             + _td(holding.get("symbol", ""))
+            + _td(_number(holding.get("price")))
             + _td(_number(holding.get("market_value")))
             + _td(_number(holding.get("cost_basis")))
             + _td(_number(gain_loss), _signed_class(gain_loss))
@@ -225,6 +226,7 @@ def _holdings_table(report: dict[str, Any]) -> str:
         "Account",
         "Type",
         "Symbol",
+        "Last Price",
         "Market Value",
         "Cost Basis",
         "Total Gain/Loss",
