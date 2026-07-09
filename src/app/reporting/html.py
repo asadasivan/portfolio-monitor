@@ -497,16 +497,22 @@ def _script() -> str:
         const tools = document.createElement("div");
         tools.className = "table-tools";
         tools.dataset.tableIndex = String(index);
+        const primaryTools = document.createElement("div");
+        primaryTools.className = "table-tools-primary";
+        const secondaryTools = document.createElement("div");
+        secondaryTools.className = "table-tools-secondary";
 
         const searchInput = document.createElement("input");
         searchInput.type = "search";
-        searchInput.placeholder = "Search this table";
+        searchInput.placeholder = "Search table";
         searchInput.setAttribute("aria-label", "Search this table");
 
         const columnPicker = document.createElement("details");
         columnPicker.className = "column-picker";
         const columnSummary = document.createElement("summary");
-        columnSummary.textContent = "Columns";
+        columnSummary.textContent = "Filter";
+        columnSummary.title = "Choose visible columns";
+        columnSummary.setAttribute("aria-label", "Choose visible columns");
         const columnOptions = document.createElement("div");
         columnOptions.className = "column-options";
         columnPicker.append(columnSummary, columnOptions);
@@ -541,7 +547,9 @@ def _script() -> str:
         const rowCount = document.createElement("div");
         rowCount.className = "row-count";
 
-        tools.append(searchInput, columnPicker, resetButton, rowCount);
+        primaryTools.append(columnPicker, searchInput);
+        secondaryTools.append(resetButton, rowCount);
+        tools.append(primaryTools, secondaryTools);
         table.before(tools);
 
         const applyFilters = () => filterTable(table, searchInput, rowCount);
@@ -843,85 +851,144 @@ def write_html_report(report: dict[str, Any], report_dir: Path) -> Path:
       white-space: nowrap;
     }}
     .table-tools {{
-      display: grid;
-      grid-template-columns: minmax(220px, 1fr) minmax(140px, 220px) auto auto;
-      gap: 8px;
+      display: flex;
+      justify-content: space-between;
       align-items: center;
-      margin: 0 0 12px;
+      gap: 16px;
+      margin: 2px 0 14px;
+      padding: 0;
+      background: transparent;
+    }}
+    .table-tools-primary,
+    .table-tools-secondary {{
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      height: 38px;
+      min-width: 0;
+    }}
+    .table-tools input[type="search"] {{
+      display: block;
+      width: clamp(260px, 32vw, 430px);
+      flex: 0 1 auto;
+      margin: 0;
+      line-height: 38px;
     }}
     .table-tools input,
     .table-tools select {{
-      min-height: 36px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
+      height: 38px;
+      box-sizing: border-box;
+      border: 1px solid #d5dce6;
+      border-radius: 999px;
       background: #ffffff;
       color: var(--text);
-      padding: 7px 9px;
+      padding: 0 16px;
       font: inherit;
-      font-size: 13px;
+      font-size: 14px;
+      line-height: 1;
+      margin: 0;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
     }}
-    .table-tools button {{
-      min-height: 36px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--soft);
-      color: var(--header);
-      padding: 7px 10px;
+    .table-tools input[type="search"]::placeholder {{
+      color: #9aa8b7;
+    }}
+    .table-tools button,
+    .column-picker summary {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 38px;
+      min-width: 86px;
+      box-sizing: border-box;
+      border: 1px solid #d5dce6;
+      border-radius: 999px;
+      background: #ffffff;
+      color: #111827;
+      padding: 0 16px;
       font: inherit;
-      font-size: 13px;
+      font-size: 14px;
+      font-weight: 800;
+      line-height: 1;
+      margin: 0;
       cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, .05);
+    }}
+    .table-tools button:hover,
+    .column-picker summary:hover {{
+      border-color: #b8c7d9;
+      background: #f8fafc;
+    }}
+    .table-tools button:focus-visible,
+    .column-picker summary:focus-visible,
+    .table-tools input:focus-visible {{
+      outline: 2px solid #60a5fa;
+      outline-offset: 1px;
     }}
     .table-tools .reset-button {{
-      font-weight: 750;
-      color: #0f3f66;
-      border-color: #b8c7d9;
-    }}
-    .column-picker {{
-      position: relative;
-      min-height: 36px;
+      align-self: center;
+      width: 86px;
+      min-width: 86px;
+      color: #496273;
     }}
     .column-picker summary {{
-      min-height: 36px;
-      box-sizing: border-box;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--soft);
-      color: var(--header);
-      padding: 7px 10px;
-      font-size: 13px;
-      cursor: pointer;
+      width: 86px;
+      min-width: 86px;
+      color: #496273;
+    }}
+    .column-picker {{
+      display: flex;
+      align-items: center;
+      position: relative;
+      height: 38px;
+      margin: 0;
+      padding: 0;
+    }}
+    .column-picker summary {{
+      min-height: 38px;
       list-style: none;
+      margin: 0;
+      appearance: none;
+      -webkit-appearance: none;
     }}
     .column-picker summary::-webkit-details-marker {{ display: none; }}
     .column-picker summary::after {{
       content: " ▾";
       color: var(--muted);
+      margin-left: 6px;
+      font-weight: 700;
     }}
     .column-picker[open] summary::after {{ content: " ▴"; }}
     .column-options {{
       position: absolute;
       z-index: 20;
-      top: 40px;
+      top: 44px;
       left: 0;
-      min-width: 220px;
-      max-height: 280px;
+      min-width: 210px;
+      max-height: 184px;
       overflow-y: auto;
-      border: 1px solid var(--border);
-      border-radius: 6px;
+      border: 1px solid #c8d4e2;
+      border-radius: 10px;
       background: #ffffff;
-      box-shadow: 0 8px 20px rgba(23, 32, 42, .12);
-      padding: 8px;
+      box-shadow: 0 12px 28px rgba(23, 32, 42, .16);
+      padding: 4px;
     }}
     .column-options label {{
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px;
+      min-height: 24px;
+      gap: 6px;
+      padding: 2px 5px;
       color: var(--text);
-      font-size: 13px;
+      font-size: 12px;
+      line-height: 1.2;
       white-space: nowrap;
     }}
     .column-options input {{
+      width: 14px;
+      height: 14px;
+      flex: 0 0 auto;
+      margin: 0;
       min-height: auto;
       padding: 0;
     }}
@@ -929,17 +996,19 @@ def write_html_report(report: dict[str, Any], report_dir: Path) -> Path:
       display: flex;
       justify-content: flex-end;
       border-top: 1px solid var(--border);
-      margin-top: 6px;
-      padding-top: 8px;
+      margin-top: 2px;
+      padding-top: 4px;
     }}
     .column-picker-actions button {{
-      min-height: 30px;
-      padding: 4px 8px;
+      height: 26px;
+      min-width: 72px;
+      padding: 0 10px;
+      font-size: 12px;
     }}
     .table-tools .row-count {{
       color: var(--muted);
-      font-size: 13px;
-      text-align: right;
+      font-size: 12px;
+      white-space: nowrap;
     }}
     th, td {{
       border-bottom: 1px solid var(--border);
@@ -999,8 +1068,10 @@ def write_html_report(report: dict[str, Any], report_dir: Path) -> Path:
       .summary-grid {{ grid-template-columns: 1fr 1fr; }}
       .checks-grid {{ grid-template-columns: 1fr; }}
       .section-heading {{ align-items: flex-start; flex-direction: column; }}
-      .table-tools {{ grid-template-columns: 1fr; }}
-      .table-tools .row-count {{ text-align: left; }}
+      .table-tools {{ align-items: flex-start; flex-direction: column; }}
+      .table-tools-primary {{ flex-wrap: wrap; width: 100%; }}
+      .table-tools-secondary {{ justify-content: space-between; width: 100%; }}
+      .table-tools input[type="search"] {{ flex: 1 1 220px; width: auto; }}
     }}
   </style>
 </head>
