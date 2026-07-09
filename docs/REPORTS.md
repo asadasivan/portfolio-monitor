@@ -11,6 +11,10 @@ Portfolio Monitor writes human-readable and assistant-ready report artifacts und
 
 Use `reports/latest.html` for human review. Use `reports/latest.ai.json` only as assistant context for summaries and repeated daily runs.
 
+`reports/latest.ai.json` is intentionally bounded for token efficiency. Large detail lists such as quality issues, reconciliation rows, broker-total requests, stale totals, risk alerts, signals, and notes include the first relevant items plus `total_count` and `omitted_count` metadata when truncated. Use `reports/latest.html` for the full human-readable detail.
+
+The daily loop prints artifact paths rather than dumping `reports/latest.ai.json` to stdout. This keeps routine assistant runs small while preserving the file for explicit summary context.
+
 ## Holdings Tables
 
 The HTML report groups holdings into:

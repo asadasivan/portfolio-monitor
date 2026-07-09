@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -108,7 +108,7 @@ class PortfolioStore:
         return {row["digest"] for row in rows}
 
     def record_imported_file(self, path: Path, source: str, digest: str, holdings_count: int) -> None:
-        now = datetime.utcnow().isoformat(timespec="seconds")
+        now = _utc_now()
         with self.connection:
             self.connection.execute(
                 """
@@ -124,7 +124,7 @@ class PortfolioStore:
             )
 
     def upsert_holdings(self, holdings: Iterable[Holding], source: str) -> dict[str, int]:
-        now = datetime.utcnow().isoformat(timespec="seconds")
+        now = _utc_now()
         holdings_list = list(holdings)
         touched_keys = {(h.account, h.broker, h.market, h.symbol) for h in holdings_list}
         touched_scopes = {(h.account, h.broker, h.market) for h in holdings_list}
@@ -193,7 +193,7 @@ class PortfolioStore:
         return [_row_to_holding(row) for row in rows]
 
     def update_prices(self, prices: Iterable[dict[str, str]]) -> dict[str, int]:
-        now = datetime.utcnow().isoformat(timespec="seconds")
+        now = _utc_now()
         counts = {"updated": 0, "not_found": 0}
         with self.connection:
             for price in prices:
@@ -225,7 +225,7 @@ class PortfolioStore:
         return counts
 
     def update_cost_basis(self, rows: Iterable[dict[str, str]]) -> dict[str, int]:
-        now = datetime.utcnow().isoformat(timespec="seconds")
+        now = _utc_now()
         counts = {"updated": 0, "not_found": 0, "skipped": 0}
         with self.connection:
             for row in rows:
@@ -285,7 +285,7 @@ class PortfolioStore:
         as_of: date,
         currency: str = "USD",
     ) -> None:
-        now = datetime.utcnow().isoformat(timespec="seconds")
+        now = _utc_now()
         with self.connection:
             self.connection.execute(
                 """
@@ -314,7 +314,7 @@ class PortfolioStore:
         }
 
     def upsert_income_summaries(self, summaries: Iterable[IncomeSummary]) -> int:
-        now = datetime.utcnow().isoformat(timespec="seconds")
+        now = _utc_now()
         count = 0
         with self.connection:
             for summary in summaries:
@@ -371,7 +371,7 @@ class PortfolioStore:
         ).fetchone()
 
     def save_snapshot(self, snapshot_date: date, total_value: Decimal, fx_rates: dict | None = None) -> None:
-        now = datetime.utcnow().isoformat(timespec="seconds")
+        now = _utc_now()
         fx_rates_json = json.dumps({str(currency): str(rate) for currency, rate in (fx_rates or {}).items()}, sort_keys=True)
         with self.connection:
             self.connection.execute(
@@ -404,6 +404,10 @@ def _holding_values(holding: Holding, now: str) -> tuple[str, ...]:
         _decimal_to_text(holding.annual_dividend_per_share),
         now,
     )
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")
 
 
 def _income_values(summary: IncomeSummary, now: str) -> tuple[str | None, ...]:

@@ -14,4 +14,3 @@ else
 fi
 
 "$PORTFOLIO_MONITOR" daily-loop input
-printf '\nHTML report: reports/latest.html\n'

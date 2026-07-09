@@ -27,6 +27,7 @@ After the active portfolio database has been initialized, daily runs do not requ
 3. If there are no new files, it skips statement ingestion and uses the active portfolio database.
 4. It refreshes US market prices through Yahoo Finance and Indian MF NAVs through AMFI-backed lookup.
 5. It regenerates `reports/latest.html`, `reports/latest.ai.json`, and the compact text report.
+6. It prints report artifact paths instead of dumping `reports/latest.ai.json` to stdout, keeping repeated assistant runs low-context.
 
 The report uses three holdings tables:
 

@@ -6,6 +6,13 @@ from typing import Any
 
 from app.reporting.serialization import money, pct, report_filename, to_jsonable, write_latest_alias
 
+MAX_AI_RECONCILIATION_ROWS = 20
+MAX_AI_QUALITY_ISSUES = 25
+MAX_AI_BROKER_REQUESTS = 20
+MAX_AI_STALE_ACCOUNT_VALUES = 20
+MAX_AI_RISK_ALERTS = 20
+MAX_AI_TOP_HOLDINGS = 10
+
 
 def render_compact(report: dict[str, Any]) -> str:
     top_holdings = ", ".join(
@@ -33,6 +40,7 @@ def render_compact(report: dict[str, Any]) -> str:
 
 def render_ai_json(report: dict[str, Any]) -> str:
     income = report.get("actual_income", {})
+    quality = _compact_quality(report.get("quality", {}))
     payload = {
         "low_token_portfolio_analysis_context": to_jsonable(
             {
@@ -46,13 +54,13 @@ def render_ai_json(report: dict[str, Any]) -> str:
                 "daily_change_pct": report.get("daily_change_pct"),
                 "fx_revaluation": report.get("fx_revaluation", {}),
                 "by_account": report.get("by_account", {}),
-                "account_reconciliation": report.get("account_reconciliation", []),
+                "account_reconciliation": _bounded_list(report.get("account_reconciliation", []), MAX_AI_RECONCILIATION_ROWS),
                 "broker_check_mode": report.get("broker_check_mode"),
-                "broker_total_requests": report.get("broker_total_requests", []),
-                "stale_account_values": report.get("stale_account_values", []),
-                "quality": report.get("quality", {}),
+                "broker_total_requests": _bounded_list(report.get("broker_total_requests", []), MAX_AI_BROKER_REQUESTS),
+                "stale_account_values": _bounded_list(report.get("stale_account_values", []), MAX_AI_STALE_ACCOUNT_VALUES),
+                "quality": quality,
                 "by_asset_type": report.get("by_asset_type", {}),
-                "concentration_alerts": report.get("concentration_alerts", []),
+                "concentration_alerts": _bounded_list(report.get("concentration_alerts", []), MAX_AI_RISK_ALERTS),
                 "dividends": report.get("dividends", {}),
                 "actual_income": {
                     "total_dividends_period": income.get("total_dividends_period"),
@@ -62,13 +70,38 @@ def render_ai_json(report: dict[str, Any]) -> str:
                     "total_other_income_period": income.get("total_other_income_period"),
                     "total_other_income_ytd": income.get("total_other_income_ytd"),
                 },
-                "top_holdings": [_compact_holding(row) for row in report.get("holdings", [])[:10]],
-                "signals": report.get("signals", []),
-                "notes": report.get("notes", []),
+                "top_holdings": [_compact_holding(row) for row in report.get("holdings", [])[:MAX_AI_TOP_HOLDINGS]],
+                "signals": _bounded_list(report.get("signals", []), MAX_AI_RISK_ALERTS),
+                "notes": _bounded_list(report.get("notes", []), MAX_AI_RISK_ALERTS),
             }
         )
     }
     return json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n"
+
+
+def _bounded_list(values: Any, limit: int) -> list[Any] | dict[str, Any]:
+    if not isinstance(values, list):
+        return []
+    if len(values) <= limit:
+        return values
+    return {
+        "items": values[:limit],
+        "total_count": len(values),
+        "omitted_count": len(values) - limit,
+    }
+
+
+def _compact_quality(quality: Any) -> dict[str, Any]:
+    if not isinstance(quality, dict):
+        quality = {}
+    issues = quality.get("issues", [])
+    compact = {
+        "status": quality.get("status", "UNKNOWN"),
+        "issue_count": quality.get("issue_count", 0),
+        "by_severity": quality.get("by_severity", {}),
+    }
+    compact["issues"] = _bounded_list(issues if isinstance(issues, list) else [], MAX_AI_QUALITY_ISSUES)
+    return compact
 
 
 def _compact_holding(row: dict[str, Any]) -> dict[str, Any]:

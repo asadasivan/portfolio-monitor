@@ -1052,7 +1052,8 @@ def write_html_report(report: dict[str, Any], report_dir: Path) -> Path:
     .recon-status.status-critical,
     .recon-status.status-error,
     .recon-status.status-failed,
-    .recon-status.status-mismatch {{
+    .recon-status.status-mismatch,
+    .recon-status.status-review-required {{
       background: #fee2e2;
       color: var(--bad);
     }}

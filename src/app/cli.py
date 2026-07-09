@@ -224,7 +224,7 @@ def _daily_loop(store: PortfolioStore, config: dict, input_path: Path, provider:
         broker_total_requests=broker_total_requests,
         broker_check_mode="statement_import" if ingest_result["imported"] else "broker_totals",
     )
-    _print_latest_report(report_dir(config), json_output=True)
+    _print_daily_loop_outputs(report_dir(config))
 
 
 def _statement_files(path: Path) -> list[Path]:
@@ -308,6 +308,12 @@ def _print_holdings(store: PortfolioStore) -> None:
             f"{row['status']:<28} {row['account']:<12} {row['market']:<6} "
             f"{row['symbol']:<14} qty={row['quantity']} price={row['current_price'] or 'n/a'}"
         )
+
+
+def _print_daily_loop_outputs(base_report_dir: Path) -> None:
+    print(f"HTML report: {base_report_dir / 'latest.html'}")
+    print(f"Assistant context: {base_report_dir / 'latest.ai.json'}")
+    print(f"Compact summary: {base_report_dir / 'latest.compact.txt'}")
 
 
 def _update_prices(store: PortfolioStore, path: Path) -> None:

@@ -54,39 +54,44 @@ def report_dir(config: dict[str, Any]) -> Path:
 
 
 def _load_minimal_yaml(path: Path) -> dict[str, Any]:
-    """Small fallback parser for the default config shape.
+    """Small fallback parser for the documented config shape.
 
-    It supports top-level scalar keys and one-level nested mappings. Install
-    PyYAML for full YAML support.
+    It supports indentation-based mappings with scalar leaves. Install PyYAML
+    for full YAML support.
     """
-    result = dict(DEFAULT_CONFIG)
-    current_section: str | None = None
+    result: dict[str, Any] = {}
+    stack: list[tuple[int, dict[str, Any]]] = [(-1, result)]
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         if not raw_line.strip() or raw_line.lstrip().startswith("#"):
             continue
-        if not raw_line.startswith(" ") and ":" in raw_line:
-            key, value = raw_line.split(":", 1)
-            key = key.strip()
-            value = value.strip()
-            if value:
-                result[key] = _coerce_scalar(value)
-                current_section = None
-            else:
-                result.setdefault(key, {})
-                current_section = key
-        elif current_section and ":" in raw_line:
-            key, value = raw_line.split(":", 1)
-            target = result.setdefault(current_section, {})
-            if isinstance(target, dict):
-                target[key.strip()] = _coerce_scalar(value.strip())
-    return result
+        if ":" not in raw_line:
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        key, value = raw_line.split(":", 1)
+        key = key.strip()
+        value = value.split("#", 1)[0].strip()
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        parent = stack[-1][1]
+        if value:
+            parent[key] = _coerce_scalar(value)
+            continue
+        child: dict[str, Any] = {}
+        parent[key] = child
+        stack.append((indent, child))
+    return _deep_merge(DEFAULT_CONFIG, result)
 
 
 def _coerce_scalar(value: str) -> Any:
+    value = value.strip("'\"")
     if value.lower() in {"true", "false"}:
         return value.lower() == "true"
     try:
         return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
     except ValueError:
         return value
 

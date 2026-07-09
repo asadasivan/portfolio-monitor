@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from app.analysis import build_daily_report, build_monthly_report
-from app.cli import _refresh_fx_rates
+from app.cli import _daily_loop, _print_daily_loop_outputs, _refresh_fx_rates
 from app.ingestion import load_holdings
 from app.ingestion.pdf_importer import _parse_indian_mutual_fund_valuation
 from app.market_data import provider_symbol
@@ -15,6 +18,7 @@ from app.domain.models import Holding
 from app.reporting.compact import render_ai_json, render_compact, render_manifest
 from app.reporting.html import write_html_report
 from app.persistence import PortfolioStore
+from app.settings import _load_minimal_yaml
 
 
 def test_csv_import_loads_normalized_holdings(tmp_path: Path) -> None:
@@ -336,6 +340,61 @@ def test_daily_report_forces_broker_check_for_new_statement_accounts() -> None:
     ]
 
 
+def test_daily_loop_requires_input_when_database_is_empty(tmp_path: Path) -> None:
+    store = PortfolioStore(tmp_path / "portfolio.db")
+    store.initialize()
+    try:
+        with pytest.raises(SystemExit, match="No active portfolio and no supported input files found"):
+            _daily_loop(store, _config(), tmp_path / "missing-input", provider=None, timeout=1)
+    finally:
+        store.close()
+
+
+def test_daily_loop_uses_active_database_without_reingesting_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = PortfolioStore(tmp_path / "portfolio.db")
+    store.initialize()
+    calls: list[str] = []
+
+    def fake_refresh_prices(*args: object, **kwargs: object) -> int:
+        calls.append("refresh_prices")
+        return 0
+
+    def fake_refresh_fx_rates(*args: object, **kwargs: object) -> int:
+        calls.append("refresh_fx")
+        return 0
+
+    def fake_analyze(*args: object, **kwargs: object) -> None:
+        calls.append("analyze")
+
+    def fake_print_daily_loop_outputs(*args: object, **kwargs: object) -> None:
+        calls.append("print_outputs")
+
+    monkeypatch.setattr("app.cli._refresh_prices", fake_refresh_prices)
+    monkeypatch.setattr("app.cli._refresh_fx_rates", fake_refresh_fx_rates)
+    monkeypatch.setattr("app.cli._analyze", fake_analyze)
+    monkeypatch.setattr("app.cli._print_daily_loop_outputs", fake_print_daily_loop_outputs)
+
+    try:
+        store.upsert_holdings(_holdings(), source="statement")
+        _daily_loop(store, _config(), tmp_path / "empty-input", provider=None, timeout=1)
+    finally:
+        store.close()
+
+    assert calls == ["refresh_prices", "refresh_fx", "analyze", "print_outputs"]
+
+
+def test_daily_loop_output_points_to_artifacts_without_dumping_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _print_path = tmp_path / "reports"
+
+    _print_daily_loop_outputs(_print_path)
+
+    output = capsys.readouterr().out
+    assert "HTML report:" in output
+    assert "Assistant context:" in output
+    assert "Compact summary:" in output
+    assert "low_token_portfolio_analysis_context" not in output
+
+
 def test_compact_ai_outputs_are_small_and_structured() -> None:
     report = build_daily_report(_holdings(), Decimal("80000"), _config())
     compact = render_compact(report)
@@ -346,6 +405,61 @@ def test_compact_ai_outputs_are_small_and_structured() -> None:
     assert "top_holdings=" in compact
     assert len(compact) < 2000
     assert len(ai_json) < 5000
+
+
+def test_compact_ai_json_bounds_large_detail_lists() -> None:
+    report = build_daily_report(_holdings(), Decimal("80000"), _config())
+    report["quality"] = {
+        "status": "WATCH",
+        "issue_count": 40,
+        "by_severity": {"critical": 0, "warning": 40, "info": 0},
+        "issues": [
+            {
+                "severity": "warning",
+                "code": f"ISSUE_{index}",
+                "message": "Synthetic test issue",
+                "remediation": "Review",
+                "symbol": "TEST",
+                "account": "Broker A",
+            }
+            for index in range(40)
+        ],
+    }
+    report["account_reconciliation"] = [{"account": f"Account {index}", "status": "WATCH"} for index in range(30)]
+
+    payload = json.loads(render_ai_json(report))["low_token_portfolio_analysis_context"]
+
+    assert payload["quality"]["issue_count"] == 40
+    assert payload["quality"]["issues"]["total_count"] == 40
+    assert payload["quality"]["issues"]["omitted_count"] == 15
+    assert len(payload["quality"]["issues"]["items"]) == 25
+    assert payload["account_reconciliation"]["total_count"] == 30
+    assert payload["account_reconciliation"]["omitted_count"] == 10
+
+
+def test_minimal_yaml_loader_supports_documented_nested_config(tmp_path: Path) -> None:
+    config_path = tmp_path / "user.yaml"
+    config_path.write_text(
+        """
+base_currency: USD
+currency_conversion:
+  rates_to_base:
+    USD: 1
+    INR: 0.012
+reporting:
+  output_currency: INR
+risk_profile:
+  max_single_stock_pct: 12
+""",
+        encoding="utf-8",
+    )
+
+    config = _load_minimal_yaml(config_path)
+
+    assert config["currency_conversion"]["rates_to_base"]["INR"] == 0.012
+    assert config["reporting"]["output_currency"] == "INR"
+    assert config["risk_profile"]["max_single_stock_pct"] == 12
+    assert config["risk_profile"]["max_crypto_pct"] == 10
 
 
 def test_html_report_has_interactive_holdings_and_risk_controls(tmp_path: Path) -> None:
@@ -391,6 +505,27 @@ def test_html_report_shows_all_data_quality_issues(tmp_path: Path) -> None:
     assert "View all issues" in html
     assert "more issues not shown" not in html
     assert html.count('class="issue-item severity-info"') == len(holdings)
+
+
+def test_html_report_styles_review_required_reconciliation_status(tmp_path: Path) -> None:
+    report = build_daily_report(
+        _holdings(),
+        Decimal("80000"),
+        _config(),
+        {
+            "Broker A": {
+                "current_value": Decimal("100000"),
+                "currency": "USD",
+                "as_of": date.today().isoformat(),
+            }
+        },
+        force_account_reconciliation=True,
+    )
+
+    html = write_html_report(report, tmp_path).read_text(encoding="utf-8")
+
+    assert "status-review-required" in html
+    assert ".recon-status.status-review-required" in html
 
 
 def test_html_report_marks_negative_value_and_cost_cells_red(tmp_path: Path) -> None:

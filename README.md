@@ -13,6 +13,7 @@ The primary workflow is: create a local project in your AI assistant, place your
 - Calculates market value, gain/loss, allocation, dividend estimates, and concentration risk.
 - Helps analyze investment performance using your own local files.
 - Generates an interactive local HTML report with sorting, searching, and filtering, plus assistant-ready JSON context.
+- Keeps repeated assistant runs efficient by bounding the size of `reports/latest.ai.json` while preserving counts and omitted-detail metadata.
 
 ## What It Does Not Do
 
