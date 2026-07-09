@@ -22,6 +22,16 @@ The HTML report groups holdings into:
 
 Each holdings table includes a total row. Rows with negative gain/loss values are highlighted across the full row.
 
+## Daily Change And FX Revaluation
+
+When live FX rates change during a daily run, the report separates portfolio movement into three values:
+
+- **Market Daily Change**: estimated portfolio movement after removing the effect of refreshed FX rates.
+- **FX Revaluation**: change caused by revaluing non-base-currency holdings or broker totals with refreshed FX rates.
+- **Total Change After FX**: total change versus the prior saved snapshot after applying refreshed FX rates.
+
+This avoids presenting an FX-rate revaluation as if it were pure market performance. If FX rates do not change during the run, the report shows the normal **Daily Change** card.
+
 ## Report Checks
 
 The HTML report includes compact checks near the top.

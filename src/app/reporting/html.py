@@ -116,6 +116,13 @@ def _signed_class(value: Any) -> str:
     return "positive" if decimal > 0 else "negative"
 
 
+def _negative_class(value: Any) -> str:
+    decimal = _decimal(value)
+    if decimal is None or decimal >= 0:
+        return ""
+    return "negative"
+
+
 def _negative_row_class(*values: Any) -> str:
     for value in values:
         decimal = _decimal(value)
@@ -179,19 +186,48 @@ def _summary(report: dict[str, Any]) -> str:
     generated = datetime.now().isoformat(timespec="seconds")
     daily_change = report.get("daily_change")
     daily_change_pct = report.get("daily_change_pct")
+    fx_revaluation = report.get("fx_revaluation", {})
     cards = [
-        ("As of", report.get("as_of", "n/a")),
-        (_currency_heading("Portfolio Value", report), _display_money(report.get("portfolio_value"), report)),
-        (_currency_heading("Daily Change", report), f"{_display_money(daily_change, report)} ({_pct(daily_change_pct)})"),
-        ("Holdings", holdings_count),
+        ("As of", report.get("as_of", "n/a"), ""),
+        (_currency_heading("Portfolio Value", report), _display_money(report.get("portfolio_value"), report), ""),
     ]
+    if isinstance(fx_revaluation, dict) and fx_revaluation.get("status") == "changed":
+        cards.extend(
+            [
+                (
+                    _currency_heading("Market Daily Change", report),
+                    f"{_display_money(fx_revaluation.get('market_daily_change'), report)} "
+                    f"({_pct(fx_revaluation.get('market_daily_change_pct'))})",
+                    _signed_class(fx_revaluation.get("market_daily_change")),
+                ),
+                (
+                    _currency_heading("FX Revaluation", report),
+                    _display_money(fx_revaluation.get("fx_impact"), report),
+                    _signed_class(fx_revaluation.get("fx_impact")),
+                ),
+                (
+                    _currency_heading("Total Change After FX", report),
+                    f"{_display_money(daily_change, report)} ({_pct(daily_change_pct)})",
+                    _signed_class(daily_change),
+                ),
+            ]
+        )
+    else:
+        cards.append(
+            (
+                _currency_heading("Daily Change", report),
+                f"{_display_money(daily_change, report)} ({_pct(daily_change_pct)})",
+                _signed_class(daily_change),
+            )
+        )
+    cards.append(("Holdings", holdings_count, ""))
     return (
         f'<div class="generated muted">Generated {escape(generated)}</div>'
         '<section class="summary-grid">'
         + "".join(
             f'<div class="card"><div class="label">{escape(str(label))}</div>'
-            f'<div class="value">{escape(str(value))}</div></div>'
-            for label, value in cards
+            f'<div class="value{f" {value_class}" if value_class else ""}">{escape(str(value))}</div></div>'
+            for label, value, value_class in cards
         )
         + "</section>"
     )
@@ -386,23 +422,30 @@ def _holding_row(holding: dict[str, Any], report: dict[str, Any]) -> str:
         + _td(holding.get("asset_type", ""))
         + _td(holding.get("symbol", ""))
         + _td(_number(holding.get("quantity")))
-        + _td(_money_with_native(holding.get("price"), report, holding.get("native_price"), holding.get("currency")))
+        + _td(
+            _money_with_native(holding.get("price"), report, holding.get("native_price"), holding.get("currency")),
+            _negative_class(holding.get("price")),
+        )
         + _td(
             _money_with_native(
                 holding.get("market_value"),
                 report,
                 holding.get("native_market_value"),
                 holding.get("currency"),
-            )
+            ),
+            _negative_class(holding.get("market_value")),
         )
-        + _td(_money_with_native(holding.get("cost_basis"), report, holding.get("native_cost_basis"), holding.get("currency")))
+        + _td(
+            _money_with_native(holding.get("cost_basis"), report, holding.get("native_cost_basis"), holding.get("currency")),
+            _negative_class(holding.get("cost_basis")),
+        )
         + _td(
             _money_with_native(gain_loss, report, holding.get("native_gain_loss"), holding.get("currency")),
             _signed_class(gain_loss),
         )
         + _td(_pct(gain_loss_pct), _signed_class(gain_loss_pct))
         + _td(_pct(holding.get("portfolio_pct")))
-        + _td(_display_money(holding.get("annual_dividend"), report))
+        + _td(_display_money(holding.get("annual_dividend"), report), _negative_class(holding.get("annual_dividend")))
         + "</tr>"
     )
 
@@ -447,12 +490,12 @@ def _holding_total_row(holdings: list[dict[str, Any]], report: dict[str, Any]) -
         + _td("")
         + _td("")
         + _td("")
-        + _td(_money_with_native(market_value, report, native_market_value, native_currency))
-        + _td(_money_with_native(cost_basis, report, native_cost_basis, native_currency))
+        + _td(_money_with_native(market_value, report, native_market_value, native_currency), _negative_class(market_value))
+        + _td(_money_with_native(cost_basis, report, native_cost_basis, native_currency), _negative_class(cost_basis))
         + _td(_money_with_native(gain_loss, report, native_gain_loss, native_currency), _signed_class(gain_loss))
         + _td(_pct(gain_loss_pct), _signed_class(gain_loss_pct))
         + _td(_pct(portfolio_pct))
-        + _td(_display_money(annual_dividend, report))
+        + _td(_display_money(annual_dividend, report), _negative_class(annual_dividend))
         + "</tr>"
     )
 

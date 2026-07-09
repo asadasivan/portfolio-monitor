@@ -7,19 +7,34 @@ from app.reporting.serialization import money, pct, report_filename, write_lates
 
 
 def render_markdown(report: dict[str, Any]) -> str:
+    fx_revaluation = report.get("fx_revaluation", {})
     lines = [
         f"# Portfolio {str(report.get('report_type', 'report')).title()} Report",
         "",
         f"- As of: {report.get('as_of')}",
         f"- Portfolio value: {money(report.get('portfolio_value'))}",
         f"- Holdings value: {money(report.get('holdings_value'))}",
+    ]
+    if isinstance(fx_revaluation, dict) and fx_revaluation.get("status") == "changed":
+        lines.extend(
+            [
+                f"- Market daily change: {money(fx_revaluation.get('market_daily_change'))} ({pct(fx_revaluation.get('market_daily_change_pct'))})",
+                f"- FX revaluation: {money(fx_revaluation.get('fx_impact'))}",
+                f"- Total change after FX: {money(report.get('daily_change'))} ({pct(report.get('daily_change_pct'))})",
+            ]
+        )
+    elif report.get("daily_change") is not None:
+        lines.append(f"- Daily change: {money(report.get('daily_change'))} ({pct(report.get('daily_change_pct'))})")
+    lines.extend(
+        [
         f"- Quality status: {report.get('quality', {}).get('status', 'UNKNOWN')}",
         "",
         "## Accounts",
         "",
         "| Account | Value |",
         "|---|---:|",
-    ]
+        ]
+    )
     for account, value in report.get("by_account", {}).items():
         lines.append(f"| {account} | {money(value)} |")
 

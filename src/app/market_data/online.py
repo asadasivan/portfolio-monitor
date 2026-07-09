@@ -135,23 +135,40 @@ def provider_symbol(holding: Holding) -> str:
 def _fetch_yahoo_fx_rate(currency: str, base_currency: str, timeout_seconds: int) -> FxRateResult:
     direct_symbol = f"{currency}{base_currency}=X"
     inverse_symbol = f"{base_currency}{currency}=X"
+    errors = []
     try:
         direct_rate = _fetch_yahoo_price(direct_symbol, timeout_seconds=timeout_seconds)
-        if direct_rate is not None:
-            return FxRateResult(currency, base_currency, direct_rate, direct_symbol, "ok")
+    except (HTTPError, URLError, TimeoutError, socket.timeout, OSError, json.JSONDecodeError) as exc:
+        direct_rate = None
+        errors.append(f"{direct_symbol}: {exc}")
+    if direct_rate is not None:
+        return FxRateResult(currency, base_currency, direct_rate, direct_symbol, "ok")
+
+    try:
         inverse_rate = _fetch_yahoo_price(inverse_symbol, timeout_seconds=timeout_seconds)
-        if inverse_rate is not None:
-            return FxRateResult(currency, base_currency, Decimal("1") / inverse_rate, inverse_symbol, "ok")
+    except (HTTPError, URLError, TimeoutError, socket.timeout, OSError, json.JSONDecodeError) as exc:
+        inverse_rate = None
+        errors.append(f"{inverse_symbol}: {exc}")
+    if inverse_rate is not None:
+        return FxRateResult(currency, base_currency, Decimal("1") / inverse_rate, inverse_symbol, "ok")
+
+    if errors:
         return FxRateResult(
             currency,
             base_currency,
             None,
             direct_symbol,
-            "not_found",
-            "Yahoo did not return a usable FX rate.",
+            "error",
+            "; ".join(errors),
         )
-    except (HTTPError, URLError, TimeoutError, socket.timeout, OSError, json.JSONDecodeError) as exc:
-        return FxRateResult(currency, base_currency, None, direct_symbol, "error", str(exc))
+    return FxRateResult(
+        currency,
+        base_currency,
+        None,
+        direct_symbol,
+        "not_found",
+        "Yahoo did not return a usable FX rate.",
+    )
 
 
 def _fetch_yahoo_prices(holdings: list[Holding], timeout_seconds: int) -> list[PriceResult]:

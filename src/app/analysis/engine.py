@@ -28,6 +28,7 @@ def build_daily_report(
     reconciliation_accounts: set[str] | None = None,
     broker_total_requests: list[dict[str, Any]] | None = None,
     broker_check_mode: str | None = None,
+    previous_rates_to_base: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     report_date = date.today()
     applicable_account_values = _applicable_account_values(account_values, report_date)
@@ -59,6 +60,15 @@ def build_daily_report(
     if previous_total and previous_total > 0:
         daily_change = total - previous_total
         daily_change_pct = (daily_change / previous_total) * Decimal("100")
+    fx_revaluation = _fx_revaluation_summary(
+        holdings,
+        applicable_account_values,
+        total,
+        previous_total,
+        daily_change,
+        config,
+        previous_rates_to_base,
+    )
 
     return {
         "report_type": "daily",
@@ -70,6 +80,7 @@ def build_daily_report(
         "holdings_value": holdings_total,
         "daily_change": daily_change,
         "daily_change_pct": daily_change_pct,
+        "fx_revaluation": fx_revaluation,
         "by_account": by_account,
         "account_reconciliation": reconciliation,
         "broker_check_mode": broker_check_mode
@@ -159,6 +170,68 @@ def _account_breakdown(
     return dict(sorted(combined.items()))
 
 
+def _total_value_with_rates(
+    holdings: list[Holding],
+    account_values: dict[str, AccountValue] | None,
+    config: dict[str, Any],
+    rates: dict[str, Decimal],
+) -> Decimal:
+    holdings_total = sum((holding.market_value * rates.get(holding.currency.upper(), Decimal("1")) for holding in holdings), Decimal("0"))
+    if not account_values:
+        return holdings_total
+    holdings_by_account: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    for holding in holdings:
+        holdings_by_account[_account_label(holding)] += holding.market_value * rates.get(holding.currency.upper(), Decimal("1"))
+    combined = dict(holdings_by_account)
+    combined.update({account: _account_value_amount_with_rates(value, config, rates) for account, value in account_values.items()})
+    return sum(combined.values(), Decimal("0"))
+
+
+def _fx_revaluation_summary(
+    holdings: list[Holding],
+    applicable_account_values: dict[str, AccountValue],
+    total: Decimal,
+    previous_total: Decimal | None,
+    daily_change: Decimal | None,
+    config: dict[str, Any],
+    previous_rates_to_base: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    refresh = config.get("_fx_refresh", {})
+    current_rates = _rates_to_base(config)
+    previous_rates_raw = previous_rates_to_base
+    if not previous_rates_raw and isinstance(refresh, dict):
+        previous_rates_raw = refresh.get("previous_rates_to_base", {})
+    if not isinstance(previous_rates_raw, dict):
+        return {"status": "not_refreshed"}
+    previous_rates = {str(currency).upper(): Decimal(str(rate)) for currency, rate in previous_rates_raw.items()}
+    changed_currencies = sorted(
+        currency
+        for currency in set(previous_rates) | set(current_rates)
+        if previous_rates.get(currency) is not None
+        and current_rates.get(currency) is not None
+        and previous_rates[currency] != current_rates[currency]
+    )
+    if not changed_currencies:
+        return {
+            "status": "unchanged",
+            "provider": refresh.get("provider") if isinstance(refresh, dict) else None,
+            "changed_currencies": changed_currencies,
+        }
+    previous_fx_total = _total_value_with_rates(holdings, applicable_account_values, config, previous_rates)
+    fx_impact = total - previous_fx_total
+    market_daily_change = daily_change - fx_impact if daily_change is not None else None
+    market_daily_change_pct = (market_daily_change / previous_total) * Decimal("100") if market_daily_change is not None and previous_total else None
+    return {
+        "status": "changed",
+        "provider": refresh.get("provider") if isinstance(refresh, dict) else None,
+        "changed_currencies": changed_currencies,
+        "previous_value_at_old_fx": previous_fx_total,
+        "fx_impact": fx_impact,
+        "market_daily_change": market_daily_change,
+        "market_daily_change_pct": market_daily_change_pct,
+    }
+
+
 def _account_reconciliation(
     holdings_by_account: dict[str, Decimal],
     account_values: dict[str, AccountValue] | None,
@@ -193,6 +266,14 @@ def _account_value_amount(value: AccountValue, config: dict[str, Any] | None = N
     if config is None:
         return amount
     return amount * _rates_to_base(config).get(currency, Decimal("1"))
+
+
+def _account_value_amount_with_rates(value: AccountValue, config: dict[str, Any], rates: dict[str, Decimal]) -> Decimal:
+    if not isinstance(value, dict):
+        return value
+    amount = value["current_value"] if isinstance(value["current_value"], Decimal) else Decimal(str(value["current_value"]))
+    currency = str(value.get("currency", _base_currency(config))).upper()
+    return amount * rates.get(currency, Decimal("1"))
 
 
 def _account_value_as_of(value: AccountValue) -> date | None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterable
 from datetime import date, datetime
@@ -90,6 +91,12 @@ class PortfolioStore:
             );
             """
         )
+        for column_name in ("fx_rates_json",):
+            try:
+                self.connection.execute(f"alter table daily_snapshots add column {column_name} text")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
         self.connection.commit()
 
     def imported_sources(self) -> set[str]:
@@ -363,18 +370,20 @@ class PortfolioStore:
             (snapshot_date.isoformat(),),
         ).fetchone()
 
-    def save_snapshot(self, snapshot_date: date, total_value: Decimal) -> None:
+    def save_snapshot(self, snapshot_date: date, total_value: Decimal, fx_rates: dict | None = None) -> None:
         now = datetime.utcnow().isoformat(timespec="seconds")
+        fx_rates_json = json.dumps({str(currency): str(rate) for currency, rate in (fx_rates or {}).items()}, sort_keys=True)
         with self.connection:
             self.connection.execute(
                 """
-                insert into daily_snapshots(snapshot_date, total_value, created_at)
-                values (?, ?, ?)
+                insert into daily_snapshots(snapshot_date, total_value, created_at, fx_rates_json)
+                values (?, ?, ?, ?)
                 on conflict(snapshot_date) do update set
                   total_value=excluded.total_value,
-                  created_at=excluded.created_at
+                  created_at=excluded.created_at,
+                  fx_rates_json=excluded.fx_rates_json
                 """,
-                (snapshot_date.isoformat(), str(total_value), now),
+                (snapshot_date.isoformat(), str(total_value), now, fx_rates_json),
             )
 
 

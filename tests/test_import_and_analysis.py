@@ -6,10 +6,11 @@ from decimal import Decimal
 from pathlib import Path
 
 from app.analysis import build_daily_report, build_monthly_report
+from app.cli import _refresh_fx_rates
 from app.ingestion import load_holdings
 from app.ingestion.pdf_importer import _parse_indian_mutual_fund_valuation
 from app.market_data import provider_symbol
-from app.market_data.online import fetch_fx_rates, _split_indian_mutual_funds
+from app.market_data.online import FxRateResult, fetch_fx_rates, _split_indian_mutual_funds
 from app.domain.models import Holding
 from app.reporting.compact import render_ai_json, render_compact, render_manifest
 from app.reporting.html import write_html_report
@@ -159,6 +160,29 @@ def test_fetch_fx_rates_uses_inverse_yahoo_pair(monkeypatch) -> None:
     assert results[0].status == "ok"
     assert results[0].rate_to_base is not None
     assert results[0].rate_to_base.quantize(Decimal("0.0001")) == Decimal("0.0120")
+
+
+def test_refresh_fx_rates_preserves_flattened_config_fallback(monkeypatch) -> None:
+    config = {
+        "base_currency": "USD",
+        "currency_conversion": {"rates_to_base": "", "USD": 1, "INR": "0.012"},
+        "market_data": {"provider": "yahoo"},
+    }
+
+    def fake_fetch(base_currency: str, currencies: set[str], provider: str) -> list[FxRateResult]:
+        return [
+            FxRateResult("USD", "USD", Decimal("1"), "USD", "ok"),
+            FxRateResult("INR", "USD", Decimal("0.0105"), "USDINR=X", "ok"),
+        ]
+
+    monkeypatch.setattr("app.cli.fetch_fx_rates", fake_fetch)
+
+    failures = _refresh_fx_rates(config, None, 6)
+
+    assert failures == 0
+    assert config["currency_conversion"]["rates_to_base"]["INR"] == Decimal("0.0105")
+    assert config["_fx_refresh"]["previous_rates_to_base"]["INR"] == Decimal("0.012")
+    assert config["_fx_refresh"]["changed_currencies"] == ["INR"]
 
 
 def test_sift_capital_valuation_report_parses_mutual_fund_holdings() -> None:
@@ -369,6 +393,22 @@ def test_html_report_shows_all_data_quality_issues(tmp_path: Path) -> None:
     assert html.count('class="issue-item severity-info"') == len(holdings)
 
 
+def test_html_report_marks_negative_value_and_cost_cells_red(tmp_path: Path) -> None:
+    report = build_daily_report(_holdings()[:1], None, _config())
+    row = report["holdings"][0]
+    row["price"] = Decimal("-1")
+    row["market_value"] = Decimal("-100")
+    row["cost_basis"] = Decimal("-90")
+    row["annual_dividend"] = Decimal("-5")
+
+    html = write_html_report(report, tmp_path).read_text(encoding="utf-8")
+
+    assert '<td class="negative">-1.00</td>' in html
+    assert '<td class="negative">-100.00</td>' in html
+    assert '<td class="negative">-90.00</td>' in html
+    assert '<td class="negative">-5.00</td>' in html
+
+
 def test_report_converts_inr_holdings_to_base_currency_and_shows_native_value(tmp_path: Path) -> None:
     holding = Holding(
         account="Indian Mutual Funds",
@@ -416,6 +456,47 @@ def test_html_report_uses_configured_output_currency(tmp_path: Path) -> None:
     assert "Value (INR)" in html
     assert "Market Value (INR)" in html
     assert "2,083,333.33" in html
+
+
+def test_daily_report_splits_fx_revaluation_from_market_change(tmp_path: Path) -> None:
+    holding = Holding(
+        account="Indian Mutual Funds",
+        broker="Sift Capital",
+        market="IN",
+        symbol="MF_TEST",
+        name="Example Indian MF",
+        asset_type="Mutual Fund",
+        quantity=Decimal("100"),
+        cost_basis=Decimal("9000"),
+        current_price=Decimal("100"),
+        currency="INR",
+        sector="Equity: Flexi Cap",
+        statement_date=date(2026, 7, 4),
+        annual_dividend_per_share=Decimal("0"),
+    )
+    config = _config()
+    config["base_currency"] = "USD"
+    config["currency_conversion"] = {"rates_to_base": {"USD": 1, "INR": "0.0105"}}
+    config["_fx_refresh"] = {
+        "provider": "yahoo",
+        "previous_rates_to_base": {"USD": Decimal("1"), "INR": Decimal("0.012")},
+        "rates_to_base": {"USD": Decimal("1"), "INR": Decimal("0.0105")},
+        "changed_currencies": ["INR"],
+    }
+
+    report = build_daily_report([holding], Decimal("120"), config)
+
+    assert report["portfolio_value"] == Decimal("105.0000")
+    assert report["daily_change"] == Decimal("-15.0000")
+    assert report["fx_revaluation"]["fx_impact"] == Decimal("-15.0000")
+    assert report["fx_revaluation"]["market_daily_change"] == Decimal("0.0000")
+
+    html = write_html_report(report, tmp_path).read_text(encoding="utf-8")
+    assert "Market Daily Change ($)" in html
+    assert "FX Revaluation ($)" in html
+    assert "Total Change After FX ($)" in html
+    assert '<div class="value negative">-15.00</div>' in html
+    assert '<div class="value negative">-15.00 (-12.50%)</div>' in html
 
 
 def test_html_report_supports_common_output_currency_labels(tmp_path: Path) -> None:

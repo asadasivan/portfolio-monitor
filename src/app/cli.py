@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -345,11 +346,21 @@ def _base_currency(config: dict) -> str:
 
 
 def _configured_fx_currencies(config: dict) -> set[str]:
+    return set(_configured_rates_to_base(config))
+
+
+def _configured_rates_to_base(config: dict) -> dict[str, Decimal]:
     conversion = config.get("currency_conversion", {})
     rates = conversion.get("rates_to_base", {}) if isinstance(conversion, dict) else {}
+    if not isinstance(rates, dict) and isinstance(conversion, dict):
+        rates = {
+            currency: rate
+            for currency, rate in conversion.items()
+            if str(currency).upper() == str(currency) and currency != "rates_to_base"
+        }
     if not isinstance(rates, dict):
-        return set()
-    return {str(currency).upper() for currency in rates}
+        return {}
+    return {str(currency).upper(): Decimal(str(rate)) for currency, rate in rates.items()}
 
 
 def _output_currency(config: dict) -> str | None:
@@ -381,9 +392,10 @@ def _refresh_fx_rates(config: dict, provider: str | None, timeout: int, store: P
         config["currency_conversion"] = conversion
     rates = conversion.setdefault("rates_to_base", {})
     if not isinstance(rates, dict):
-        rates = {}
+        rates = _configured_rates_to_base(config)
         conversion["rates_to_base"] = rates
 
+    previous_rates = _configured_rates_to_base(config)
     updated = 0
     failures = []
     for result in results:
@@ -393,6 +405,22 @@ def _refresh_fx_rates(config: dict, provider: str | None, timeout: int, store: P
         else:
             failures.append(result)
 
+    current_rates = {str(currency).upper(): Decimal(str(rate)) for currency, rate in rates.items()}
+    changed_currencies = sorted(
+        currency
+        for currency, rate in current_rates.items()
+        if previous_rates.get(currency) is not None and previous_rates[currency] != rate
+    )
+    config["_fx_refresh"] = {
+        "provider": provider_name,
+        "base_currency": base_currency,
+        "previous_rates_to_base": previous_rates,
+        "rates_to_base": current_rates,
+        "updated": updated,
+        "failed": len(failures),
+        "changed_currencies": changed_currencies,
+    }
+
     print(f"Fetched FX rates with {provider_name}. Updated={updated}, failed={len(failures)}.")
     for failure in failures:
         print(
@@ -400,6 +428,46 @@ def _refresh_fx_rates(config: dict, provider: str | None, timeout: int, store: P
             f"{failure.status} - {failure.message or 'no detail'}"
         )
     return len(failures)
+
+
+def _snapshot_fx_rates(snapshot) -> dict[str, Decimal] | None:
+    if not snapshot or "fx_rates_json" not in snapshot.keys() or not snapshot["fx_rates_json"]:
+        return None
+    raw = json.loads(snapshot["fx_rates_json"])
+    if not isinstance(raw, dict):
+        return None
+    return {str(currency).upper(): Decimal(str(rate)) for currency, rate in raw.items()}
+
+
+def _preserve_same_day_fx_rates(config: dict, snapshot) -> dict[str, Decimal] | None:
+    current_rates = _snapshot_fx_rates(snapshot)
+    if not current_rates:
+        return None
+    fallback_rates = _configured_rates_to_base(config)
+    if not fallback_rates:
+        return None
+    conversion = config.setdefault("currency_conversion", {})
+    if not isinstance(conversion, dict):
+        conversion = {}
+        config["currency_conversion"] = conversion
+    conversion["rates_to_base"] = current_rates
+    changed_currencies = sorted(
+        currency
+        for currency in set(fallback_rates) | set(current_rates)
+        if fallback_rates.get(currency) is not None
+        and current_rates.get(currency) is not None
+        and fallback_rates[currency] != current_rates[currency]
+    )
+    config["_fx_refresh"] = {
+        "provider": "saved_snapshot",
+        "base_currency": _base_currency(config),
+        "previous_rates_to_base": fallback_rates,
+        "rates_to_base": current_rates,
+        "updated": 0,
+        "failed": 0,
+        "changed_currencies": changed_currencies,
+    }
+    return fallback_rates
 
 
 def _refresh_prices(store: PortfolioStore, config: dict, provider: str | None, timeout: int) -> int:
@@ -444,8 +512,15 @@ def _analyze(
 
     if daily:
         report_date = date.today()
+        today_snapshot = store.latest_snapshot()
+        fallback_rates = None
+        if today_snapshot and today_snapshot["snapshot_date"] == report_date.isoformat() and "_fx_refresh" not in config:
+            fallback_rates = _preserve_same_day_fx_rates(config, today_snapshot)
         previous = store.latest_snapshot_before(report_date)
         previous_total = Decimal(previous["total_value"]) if previous else None
+        previous_rates = json.loads(previous["fx_rates_json"]) if previous and "fx_rates_json" in previous.keys() and previous["fx_rates_json"] else None
+        if fallback_rates is not None:
+            previous_rates = fallback_rates
         report = build_daily_report(
             holdings,
             previous_total,
@@ -456,8 +531,13 @@ def _analyze(
             reconciliation_accounts=reconciliation_accounts,
             broker_total_requests=broker_total_requests,
             broker_check_mode=broker_check_mode,
+            previous_rates_to_base=previous_rates,
         )
-        store.save_snapshot(date.fromisoformat(report["as_of"]), report["portfolio_value"])
+        store.save_snapshot(
+            date.fromisoformat(report["as_of"]),
+            report["portfolio_value"],
+            report.get("currency_conversion", {}).get("rates_to_base", {}),
+        )
     else:
         report = build_monthly_report(
             holdings,
