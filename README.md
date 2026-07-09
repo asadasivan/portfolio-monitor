@@ -20,7 +20,7 @@ The primary workflow is: create a local project in your AI assistant, place your
 - It does not log in to brokerage accounts.
 - It does not scrape broker websites.
 - It supports portfolio tracking and performance analysis, but it does not provide investment, tax, legal, or trading advice.
-- It does not perform currency conversion yet.
+- It does not fetch live foreign exchange rates automatically; configure conversion rates locally.
 
 ## Start Here
 

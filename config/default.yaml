@@ -28,5 +28,7 @@ market_data:
   allow_stale_prices: true
 
 reporting:
+  # Display currency for human-readable reports. Calculations still use base_currency.
+  output_currency: USD
   top_movers_limit: 5
   monthly_underperformance_threshold_pct: -20

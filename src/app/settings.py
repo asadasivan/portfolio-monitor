@@ -23,6 +23,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "watch_single_stock_pct": 7,
     },
     "reporting": {
+        "output_currency": "USD",
         "top_movers_limit": 5,
         "monthly_underperformance_threshold_pct": -20,
     },

@@ -372,6 +372,21 @@ def test_report_converts_inr_holdings_to_base_currency_and_shows_native_value(tm
     assert "108.00 (INR 9,000.00)" in html
 
 
+def test_html_report_uses_configured_output_currency(tmp_path: Path) -> None:
+    config = _config()
+    config["base_currency"] = "USD"
+    config["currency_conversion"] = {"rates_to_base": {"USD": 1, "INR": "0.012"}}
+    config["reporting"] = {"output_currency": "INR"}
+
+    report = build_daily_report(_holdings()[:1], None, config)
+    html = write_html_report(report, tmp_path).read_text(encoding="utf-8")
+
+    assert "Portfolio Value (INR)" in html
+    assert "Value (INR)" in html
+    assert "Market Value (INR)" in html
+    assert "2,083,333.33" in html
+
+
 def test_report_accepts_fallback_flattened_currency_config() -> None:
     holding = Holding(
         account="Indian Mutual Funds",

@@ -36,6 +36,8 @@ def render_ai_json(report: dict[str, Any]) -> str:
             {
                 "report_type": report.get("report_type"),
                 "as_of": report.get("as_of"),
+                "base_currency": report.get("base_currency"),
+                "output_currency": report.get("output_currency"),
                 "portfolio_value": report.get("portfolio_value"),
                 "holdings_value": report.get("holdings_value"),
                 "daily_change": report.get("daily_change"),

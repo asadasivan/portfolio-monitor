@@ -64,6 +64,7 @@ def build_daily_report(
         "report_type": "daily",
         "as_of": report_date.isoformat(),
         "base_currency": _base_currency(config),
+        "output_currency": _output_currency(config),
         "currency_conversion": _currency_conversion_summary(config),
         "portfolio_value": total,
         "holdings_value": holdings_total,
@@ -110,6 +111,7 @@ def build_monthly_report(
         "report_type": "monthly",
         "as_of": report_date.isoformat(),
         "base_currency": _base_currency(config),
+        "output_currency": _output_currency(config),
         "currency_conversion": _currency_conversion_summary(config),
         "portfolio_value": total,
         "holdings_value": holdings_total,
@@ -393,6 +395,13 @@ def _quality_status(issues: list[QualityIssue]) -> str:
 
 def _base_currency(config: dict[str, Any]) -> str:
     return str(config.get("base_currency", "USD")).upper()
+
+
+def _output_currency(config: dict[str, Any]) -> str:
+    reporting = config.get("reporting", {})
+    if isinstance(reporting, dict) and reporting.get("output_currency"):
+        return str(reporting["output_currency"]).upper()
+    return _base_currency(config)
 
 
 def _rates_to_base(config: dict[str, Any]) -> dict[str, Decimal]:

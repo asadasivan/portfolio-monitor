@@ -89,7 +89,19 @@ For Sift Capital PDFs, the importer treats these rows as Indian MF holdings:
 
 When the online provider is `yahoo`, Indian MF holdings are refreshed from AMFI NAV data instead of Yahoo Finance. The statement market value is used only to seed the initial per-unit NAV and to help match the correct AMFI scheme.
 
-Reports convert INR holdings into the configured `base_currency` for totals, allocation percentages, reconciliation, and risk calculations. HTML holding rows also show the original INR value in brackets, for example `120.00 (INR 10,000.00)`. Configure conversion rates in `currency_conversion.rates_to_base`.
+Reports convert INR holdings into the configured `base_currency` for totals, allocation percentages, reconciliation, and risk calculations. Human-readable report output can use a separate display currency through `reporting.output_currency`. For example:
+
+```yaml
+base_currency: USD
+currency_conversion:
+  rates_to_base:
+    USD: 1
+    INR: 0.012
+reporting:
+  output_currency: INR
+```
+
+With `output_currency: INR`, report headings use labels such as `Value (INR)` and displayed values are converted from the base currency using `currency_conversion.rates_to_base`. HTML holding rows still show original native values in brackets when the holding currency differs from the selected output currency.
 
 ## Account Reconciliation
 

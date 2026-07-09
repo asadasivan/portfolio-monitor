@@ -25,10 +25,57 @@ def _number(value: Any) -> str:
     return f"{decimal:,.2f}"
 
 
-def _money_with_native(value: Any, native_value: Any = None, native_currency: Any = None) -> str:
-    text = _number(value)
+def _rates_to_base(report: dict[str, Any]) -> dict[str, Decimal]:
+    conversion = report.get("currency_conversion", {})
+    rates = conversion.get("rates_to_base", {}) if isinstance(conversion, dict) else {}
+    if not isinstance(rates, dict):
+        return {str(report.get("base_currency", "USD")).upper(): Decimal("1")}
+    return {str(currency).upper(): Decimal(str(rate)) for currency, rate in rates.items()}
+
+
+def _base_currency(report: dict[str, Any]) -> str:
+    return str(report.get("base_currency", "USD")).upper()
+
+
+def _output_currency(report: dict[str, Any]) -> str:
+    requested = str(report.get("output_currency") or _base_currency(report)).upper()
+    base_currency = _base_currency(report)
+    if requested == base_currency or requested in _rates_to_base(report):
+        return requested
+    return base_currency
+
+
+def _currency_symbol(currency: str) -> str:
+    return {"USD": "$", "INR": "INR"}.get(currency.upper(), currency.upper())
+
+
+def _currency_heading(label: str, report: dict[str, Any]) -> str:
+    return f"{label} ({_currency_symbol(_output_currency(report))})"
+
+
+def _display_money(value: Any, report: dict[str, Any]) -> str:
+    decimal = _decimal(value)
+    if decimal is None:
+        return "n/a"
+    output_currency = _output_currency(report)
+    base_currency = _base_currency(report)
+    if output_currency == base_currency:
+        return f"{decimal:,.2f}"
+    rate = _rates_to_base(report).get(output_currency)
+    if rate is None or rate == 0:
+        return f"{decimal:,.2f}"
+    return f"{(decimal / rate):,.2f}"
+
+
+def _money_with_native(
+    value: Any,
+    report: dict[str, Any],
+    native_value: Any = None,
+    native_currency: Any = None,
+) -> str:
+    text = _display_money(value, report)
     native_decimal = _decimal(native_value)
-    if native_decimal is None or not native_currency:
+    if native_decimal is None or not native_currency or str(native_currency).upper() == _output_currency(report):
         return text
     return f"{text} ({escape(str(native_currency))} {native_decimal:,.2f})"
 
@@ -64,9 +111,20 @@ def _risk_class(status: Any) -> str:
     return "risk-ok"
 
 
-def _td(value: Any, class_name: str = "") -> str:
+def _status_class(status: Any) -> str:
+    text = str(status or "").lower().replace("_", "-").replace(" ", "-")
+    return text or "unknown"
+
+
+def _status_badge(status: Any) -> str:
+    text = str(status or "UNKNOWN")
+    return f'<span class="recon-status status-{escape(_status_class(text))}">{escape(text)}</span>'
+
+
+def _td(value: Any, class_name: str = "", raw: bool = False) -> str:
     class_attr = f' class="{class_name}"' if class_name else ""
-    return f"<td{class_attr}>{escape(str(value))}</td>"
+    content = str(value) if raw else escape(str(value))
+    return f"<td{class_attr}>{content}</td>"
 
 
 def _th(value: str) -> str:
@@ -79,6 +137,21 @@ def _simple_table(headers: list[str], rows: list[list[Any]]) -> str:
     return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
 
+def _reconciliation_table(headers: list[str], rows: list[list[Any]]) -> str:
+    head = "".join(_th(header) for header in headers)
+    body_rows = []
+    status_index = len(headers) - 1
+    for row in rows:
+        cells = []
+        for index, value in enumerate(row):
+            if index == status_index:
+                cells.append(_td(_status_badge(value), "recon-status-cell", raw=True))
+            else:
+                cells.append(_td(value))
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+    return f"<table><thead><tr>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody></table>"
+
+
 def _summary(report: dict[str, Any]) -> str:
     holdings_count = len(report.get("holdings", []))
     generated = datetime.now().isoformat(timespec="seconds")
@@ -86,8 +159,8 @@ def _summary(report: dict[str, Any]) -> str:
     daily_change_pct = report.get("daily_change_pct")
     cards = [
         ("As of", report.get("as_of", "n/a")),
-        ("Portfolio Value", _number(report.get("portfolio_value"))),
-        ("Daily Change", f"{_number(daily_change)} ({_pct(daily_change_pct)})"),
+        (_currency_heading("Portfolio Value", report), _display_money(report.get("portfolio_value"), report)),
+        (_currency_heading("Daily Change", report), f"{_display_money(daily_change, report)} ({_pct(daily_change_pct)})"),
         ("Holdings", holdings_count),
     ]
     return (
@@ -143,20 +216,29 @@ def _report_checks(report: dict[str, Any]) -> str:
             recon_detail = f"{matched}/{len(reconciliation)} accounts matched after new statement import"
         else:
             recon_detail = f"{matched}/{len(reconciliation)} accounts matched"
-        recon_table = _simple_table(
-            ["Account", "Reported", "Parsed", "Diff", "Status"],
+        recon_table = _reconciliation_table(
+            [
+                "Account",
+                _currency_heading("Reported", report),
+                _currency_heading("Parsed", report),
+                _currency_heading("Diff", report),
+                "Status",
+            ],
             [
                 [
                     item.get("account", ""),
-                    _number(item.get("reported_value")),
-                    _number(item.get("parsed_holdings_value")),
-                    _number(item.get("difference")),
+                    _display_money(item.get("reported_value"), report),
+                    _display_money(item.get("parsed_holdings_value"), report),
+                    _display_money(item.get("difference"), report),
                     item.get("status", ""),
                 ]
                 for item in reconciliation
             ],
         )
-        recon_details = f"<details><summary>View reconciliation</summary>{recon_table}</details>"
+        recon_details = (
+            f'<details><summary>View reconciliation</summary>'
+            f'<div class="details-table-wrap">{recon_table}</div></details>'
+        )
     elif broker_total_requests:
         recon_status = "NEEDED"
         recon_detail = "Current broker totals are needed before reconciliation can run for newly imported statements."
@@ -172,17 +254,20 @@ def _report_checks(report: dict[str, Any]) -> str:
                 for item in broker_total_requests
             ],
         )
-        recon_details = f"<details><summary>View needed broker totals</summary>{request_table}</details>"
+        recon_details = (
+            f'<details><summary>View needed broker totals</summary>'
+            f'<div class="details-table-wrap">{request_table}</div></details>'
+        )
     elif stale_account_values:
         has_missing = any(str(item.get("status", "")).upper() == "MISSING_CURRENT_TOTAL" for item in stale_account_values)
         recon_status = "NEEDED" if has_missing else "SKIPPED"
         recon_detail = "Broker totals are missing or older than this current-price report, so reconciliation was skipped."
-        stale_table = _simple_table(
-            ["Account", "Reported", "Broker As Of", "Report As Of", "Status"],
+        stale_table = _reconciliation_table(
+            ["Account", _currency_heading("Reported", report), "Broker As Of", "Report As Of", "Status"],
             [
                 [
                     item.get("account", ""),
-                    _number(item.get("reported_value")),
+                    _display_money(item.get("reported_value"), report),
                     item.get("as_of", ""),
                     item.get("report_as_of", ""),
                     item.get("status", ""),
@@ -190,7 +275,10 @@ def _report_checks(report: dict[str, Any]) -> str:
                 for item in stale_account_values
             ],
         )
-        recon_details = f"<details><summary>View broker totals</summary>{stale_table}</details>"
+        recon_details = (
+            f'<details><summary>View broker totals</summary>'
+            f'<div class="details-table-wrap">{stale_table}</div></details>'
+        )
     else:
         recon_status = "NOT SET"
         recon_detail = "No Fidelity/Robinhood app totals were entered for comparison."
@@ -241,13 +329,19 @@ def _report_checks(report: dict[str, Any]) -> str:
 
 
 def _account_breakdown(report: dict[str, Any]) -> str:
-    rows = [[account, _number(value)] for account, value in sorted(report.get("by_account", {}).items())]
-    return f'<section class="section-account"><h2>Account Breakdown</h2>{_simple_table(["Account", "Value"], rows)}</section>'
+    rows = [[account, _display_money(value, report)] for account, value in sorted(report.get("by_account", {}).items())]
+    return (
+        f'<section class="section-account"><h2>Account Breakdown</h2>'
+        f'{_simple_table(["Account", _currency_heading("Value", report)], rows)}</section>'
+    )
 
 
 def _asset_breakdown(report: dict[str, Any]) -> str:
-    rows = [[asset_type, _number(value)] for asset_type, value in sorted(report.get("by_asset_type", {}).items())]
-    return f'<section class="section-asset"><h2>Asset-Type Breakdown</h2>{_simple_table(["Category", "Value"], rows)}</section>'
+    rows = [[asset_type, _display_money(value, report)] for asset_type, value in sorted(report.get("by_asset_type", {}).items())]
+    return (
+        f'<section class="section-asset"><h2>Asset-Type Breakdown</h2>'
+        f'{_simple_table(["Category", _currency_heading("Value", report)], rows)}</section>'
+    )
 
 
 def _risk_alerts(report: dict[str, Any]) -> str:
@@ -259,7 +353,7 @@ def _risk_alerts(report: dict[str, Any]) -> str:
     return f'<section class="section-risk"><h2>Risk Alerts</h2><ul>{items}</ul></section>'
 
 
-def _holding_row(holding: dict[str, Any]) -> str:
+def _holding_row(holding: dict[str, Any], report: dict[str, Any]) -> str:
     gain_loss = holding.get("gain_loss")
     gain_loss_pct = holding.get("gain_loss_pct")
     row_class = _negative_row_class(gain_loss, gain_loss_pct)
@@ -270,22 +364,23 @@ def _holding_row(holding: dict[str, Any]) -> str:
         + _td(holding.get("asset_type", ""))
         + _td(holding.get("symbol", ""))
         + _td(_number(holding.get("quantity")))
-        + _td(_money_with_native(holding.get("price"), holding.get("native_price"), holding.get("currency")))
+        + _td(_money_with_native(holding.get("price"), report, holding.get("native_price"), holding.get("currency")))
         + _td(
             _money_with_native(
                 holding.get("market_value"),
+                report,
                 holding.get("native_market_value"),
                 holding.get("currency"),
             )
         )
-        + _td(_money_with_native(holding.get("cost_basis"), holding.get("native_cost_basis"), holding.get("currency")))
+        + _td(_money_with_native(holding.get("cost_basis"), report, holding.get("native_cost_basis"), holding.get("currency")))
         + _td(
-            _money_with_native(gain_loss, holding.get("native_gain_loss"), holding.get("currency")),
+            _money_with_native(gain_loss, report, holding.get("native_gain_loss"), holding.get("currency")),
             _signed_class(gain_loss),
         )
         + _td(_pct(gain_loss_pct), _signed_class(gain_loss_pct))
         + _td(_pct(holding.get("portfolio_pct")))
-        + _td(_number(holding.get("annual_dividend")))
+        + _td(_display_money(holding.get("annual_dividend"), report))
         + "</tr>"
     )
 
@@ -309,7 +404,7 @@ def _single_native_currency(holdings: list[dict[str, Any]]) -> str | None:
     return None
 
 
-def _holding_total_row(holdings: list[dict[str, Any]]) -> str:
+def _holding_total_row(holdings: list[dict[str, Any]], report: dict[str, Any]) -> str:
     market_value = _sum_optional(holdings, "market_value")
     cost_basis = _sum_optional(holdings, "cost_basis")
     gain_loss = _sum_optional(holdings, "gain_loss")
@@ -330,34 +425,34 @@ def _holding_total_row(holdings: list[dict[str, Any]]) -> str:
         + _td("")
         + _td("")
         + _td("")
-        + _td(_money_with_native(market_value, native_market_value, native_currency))
-        + _td(_money_with_native(cost_basis, native_cost_basis, native_currency))
-        + _td(_money_with_native(gain_loss, native_gain_loss, native_currency), _signed_class(gain_loss))
+        + _td(_money_with_native(market_value, report, native_market_value, native_currency))
+        + _td(_money_with_native(cost_basis, report, native_cost_basis, native_currency))
+        + _td(_money_with_native(gain_loss, report, native_gain_loss, native_currency), _signed_class(gain_loss))
         + _td(_pct(gain_loss_pct), _signed_class(gain_loss_pct))
         + _td(_pct(portfolio_pct))
-        + _td(_number(annual_dividend))
+        + _td(_display_money(annual_dividend, report))
         + "</tr>"
     )
 
 
-def _holding_table_section(title: str, holdings: list[dict[str, Any]]) -> str:
-    rows = [_holding_row(holding) for holding in holdings]
+def _holding_table_section(title: str, holdings: list[dict[str, Any]], report: dict[str, Any]) -> str:
+    rows = [_holding_row(holding, report) for holding in holdings]
     if not rows:
         rows = ['<tr><td colspan="11" class="muted">No holdings in this category.</td></tr>']
     else:
-        rows.append(_holding_total_row(holdings))
+        rows.append(_holding_total_row(holdings, report))
     headers = [
         "Account",
         "Type",
         "Symbol",
         "Units",
-        "Last Price",
-        "Market Value",
-        "Cost Basis",
-        "Total Gain/Loss",
+        _currency_heading("Last Price", report),
+        _currency_heading("Market Value", report),
+        _currency_heading("Cost Basis", report),
+        _currency_heading("Total Gain/Loss", report),
         "Gain/Loss %",
         "Portfolio %",
-        "Est. Annual Dividend",
+        _currency_heading("Est. Annual Dividend", report),
     ]
     return (
         f'<section class="section-holdings"><h2>{escape(title)}</h2><table data-interactive="true"><thead><tr>'
@@ -384,12 +479,12 @@ def _holdings_tables(report: dict[str, Any]) -> str:
     categorized = {id(holding) for holding in [*us_stock_etf, *india_mf_stock, *crypto]}
     other = [holding for holding in holdings if id(holding) not in categorized]
     sections = [
-        _holding_table_section("US Stocks and ETF", us_stock_etf),
-        _holding_table_section("India MF and Stocks", india_mf_stock),
-        _holding_table_section("Crypto", crypto),
+        _holding_table_section("US Stocks and ETF", us_stock_etf, report),
+        _holding_table_section("India MF and Stocks", india_mf_stock, report),
+        _holding_table_section("Crypto", crypto, report),
     ]
     if other:
-        sections.append(_holding_table_section("Other Holdings", other))
+        sections.append(_holding_table_section("Other Holdings", other, report))
     return "".join(sections)
 
 
@@ -419,8 +514,10 @@ def _dividend_estimate(report: dict[str, Any]) -> str:
     dividends = report.get("dividends", {})
     return (
         '<section class="section-dividend"><h2>Dividend Estimate</h2>'
-        f"<p><strong>Projected annual dividend:</strong> {escape(_number(dividends.get('projected_annual')))}</p>"
-        f"<p><strong>Projected monthly average:</strong> {escape(_number(dividends.get('projected_monthly_average')))}</p>"
+        f"<p><strong>{escape(_currency_heading('Projected annual dividend', report))}:</strong> "
+        f"{escape(_display_money(dividends.get('projected_annual'), report))}</p>"
+        f"<p><strong>{escape(_currency_heading('Projected monthly average', report))}:</strong> "
+        f"{escape(_display_money(dividends.get('projected_monthly_average'), report))}</p>"
         "<p>Basis: statement-provided estimated annual income where available. This is an estimate, not a guaranteed dividend forecast.</p>"
         "</section>"
     )
@@ -725,6 +822,8 @@ def write_html_report(report: dict[str, Any], report_dir: Path) -> Path:
       background: #fbfcfe;
       padding: 12px;
       min-height: 116px;
+      min-width: 0;
+      overflow: hidden;
     }}
     .check-label {{
       color: var(--muted);
@@ -834,6 +933,7 @@ def write_html_report(report: dict[str, Any], report_dir: Path) -> Path:
     details {{
       margin-top: 10px;
       font-size: 13px;
+      max-width: 100%;
     }}
     details summary {{
       color: var(--header);
@@ -841,8 +941,55 @@ def write_html_report(report: dict[str, Any], report_dir: Path) -> Path:
       font-weight: 650;
     }}
     details table {{
-      margin-top: 10px;
+      margin-top: 0;
       font-size: 13px;
+    }}
+    .details-table-wrap {{
+      max-width: 100%;
+      margin-top: 10px;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+    }}
+    .details-table-wrap table {{
+      width: max-content;
+      min-width: 100%;
+    }}
+    .recon-status-cell {{
+      text-align: left;
+    }}
+    .recon-status {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 70px;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .02em;
+      line-height: 1.2;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }}
+    .recon-status.status-matched,
+    .recon-status.status-ok {{
+      background: #dcfce7;
+      color: var(--good);
+    }}
+    .recon-status.status-watch,
+    .recon-status.status-review,
+    .recon-status.status-needed,
+    .recon-status.status-skipped,
+    .recon-status.status-missing-current-total {{
+      background: #fef3c7;
+      color: var(--watch);
+    }}
+    .recon-status.status-critical,
+    .recon-status.status-error,
+    .recon-status.status-failed,
+    .recon-status.status-mismatch {{
+      background: #fee2e2;
+      color: var(--bad);
     }}
     table {{
       width: 100%;
