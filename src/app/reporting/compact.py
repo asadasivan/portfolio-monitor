@@ -30,6 +30,7 @@ def render_compact(report: dict[str, Any]) -> str:
 
 
 def render_ai_json(report: dict[str, Any]) -> str:
+    income = report.get("actual_income", {})
     payload = {
         "low_token_portfolio_analysis_context": to_jsonable(
             {
@@ -41,18 +42,47 @@ def render_ai_json(report: dict[str, Any]) -> str:
                 "daily_change_pct": report.get("daily_change_pct"),
                 "by_account": report.get("by_account", {}),
                 "account_reconciliation": report.get("account_reconciliation", []),
+                "broker_check_mode": report.get("broker_check_mode"),
+                "broker_total_requests": report.get("broker_total_requests", []),
+                "stale_account_values": report.get("stale_account_values", []),
                 "quality": report.get("quality", {}),
                 "by_asset_type": report.get("by_asset_type", {}),
                 "concentration_alerts": report.get("concentration_alerts", []),
                 "dividends": report.get("dividends", {}),
-                "actual_income": report.get("actual_income", {}),
-                "top_holdings": report.get("holdings", [])[:10],
+                "actual_income": {
+                    "total_dividends_period": income.get("total_dividends_period"),
+                    "total_dividends_ytd": income.get("total_dividends_ytd"),
+                    "total_interest_period": income.get("total_interest_period"),
+                    "total_interest_ytd": income.get("total_interest_ytd"),
+                    "total_other_income_period": income.get("total_other_income_period"),
+                    "total_other_income_ytd": income.get("total_other_income_ytd"),
+                },
+                "top_holdings": [_compact_holding(row) for row in report.get("holdings", [])[:10]],
                 "signals": report.get("signals", []),
                 "notes": report.get("notes", []),
             }
         )
     }
-    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n"
+
+
+def _compact_holding(row: dict[str, Any]) -> dict[str, Any]:
+    compact = {
+        "symbol": row.get("symbol"),
+        "account": row.get("account"),
+        "type": row.get("asset_type"),
+        "market": row.get("market"),
+        "value": row.get("market_value"),
+        "pct": row.get("portfolio_pct"),
+        "gain_loss": row.get("gain_loss"),
+        "gain_loss_pct": row.get("gain_loss_pct"),
+        "risk": row.get("risk_status"),
+    }
+    native_value = row.get("native_market_value")
+    if native_value is not None:
+        compact["native_value"] = native_value
+        compact["currency"] = row.get("currency")
+    return compact
 
 
 def render_manifest(report: dict[str, Any]) -> str:

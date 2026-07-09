@@ -12,17 +12,54 @@ git clone https://github.com/asadasivan/portfolio-monitor.git && cd portfolio-mo
 
 ## 2. Add Your Files
 
-Add your real brokerage statements or normalized holdings CSV files to `input/`.
+For the first run, add your real brokerage statements or normalized holdings CSV files to `input/`.
 
 Do not create or use demo, sample, synthetic, or test portfolio files for normal monitoring.
 
-## 3. Ask the Assistant to Run the Loop
+After the active portfolio database has been initialized, daily runs do not require the same statement files to be present. Add new files to `input/` only when you have a new statement or updated normalized holdings export to import.
+
+## 3. Daily Loop Behavior
+
+`sh scripts/run_daily.sh` runs the daily loop with this sequence:
+
+1. If there is no active portfolio yet, it requires at least one supported real input file under `input/`.
+2. If new supported files exist under `input/`, it imports only files that have not already been imported.
+3. If there are no new files, it skips statement ingestion and uses the active portfolio database.
+4. It refreshes US market prices through Yahoo Finance and Indian MF NAVs through AMFI-backed lookup.
+5. It regenerates `reports/latest.html`, `reports/latest.ai.json`, and the compact text report.
+
+The report uses three holdings tables:
+
+- US Stocks and ETF
+- India MF and Stocks
+- Crypto
+
+`reports/latest.html` is the full human report. `reports/latest.ai.json` is intentionally compact and should be used only as assistant context to keep repeated daily runs low-token.
+
+## Broker Total Checks
+
+Broker total checks are intentionally date-aware:
+
+- On normal price-only daily runs, older broker totals are shown as skipped because live prices will naturally drift from old statement/app values.
+- Broker reconciliation is an all-account check: every account with a same-day broker/app total is reconciled.
+- When the daily loop imports a new statement file, the report asks for same-day broker/app totals for any active account that does not have one.
+- If an imported statement is older than today, provide the current broker/app total by looking at the brokerage account before relying on reconciliation:
+
+```bash
+portfolio-monitor account-value "Robinhood" 55645.07 --as-of 2026-07-09
+portfolio-monitor account-value "Fidelity" 1479869.13 --as-of 2026-07-09
+```
+
+Use the account label shown in the report, such as `Robinhood`, `Fidelity`, or `Sift Capital`.
+
+## 4. Ask the Assistant to Run the Loop
 
 Use this prompt:
 
 ```text
-Run the Portfolio Monitor daily loop using only my real files under input/.
-If input/ is missing or empty, stop and ask me to add brokerage statements or a normalized holdings CSV.
+Run the Portfolio Monitor daily loop.
+If there is no active portfolio database yet and input/ is missing or empty, stop and ask me to add brokerage statements or a normalized holdings CSV.
+If the active portfolio already exists, import only new files from input/ if present; otherwise just refresh online prices and generate the report.
 
 Generate the interactive HTML report and summarize the result.
 The main output should be reports/latest.html with sorting, searching, and filtering.

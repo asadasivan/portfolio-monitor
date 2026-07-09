@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -29,6 +30,12 @@ def main() -> None:
     ingest_parser = subparsers.add_parser("ingest", help="Import all supported statement files from a directory")
     ingest_parser.add_argument("path", nargs="?", default="input")
     ingest_parser.add_argument("--source", default="statement")
+    ingest_parser.add_argument("--new-only", action="store_true", help="Import only files not previously imported")
+
+    daily_loop_parser = subparsers.add_parser("daily-loop", help="Run the daily workflow with incremental ingestion")
+    daily_loop_parser.add_argument("path", nargs="?", default="input")
+    daily_loop_parser.add_argument("--provider", default=None, help="Online price provider, for example yahoo")
+    daily_loop_parser.add_argument("--timeout", type=int, default=6, help="Seconds to wait per symbol")
 
     prices_parser = subparsers.add_parser("prices", help="Update current prices from a CSV")
     prices_parser.add_argument("path")
@@ -79,7 +86,9 @@ def main() -> None:
         if args.command == "import":
             _import_statement(store, Path(args.path), args.source)
         elif args.command == "ingest":
-            _ingest_directory(store, Path(args.path), args.source)
+            _ingest_directory(store, Path(args.path), args.source, new_only=args.new_only)
+        elif args.command == "daily-loop":
+            _daily_loop(store, config, Path(args.path), args.provider, args.timeout)
         elif args.command == "prices":
             _update_prices(store, Path(args.path))
         elif args.command == "cost-basis":
@@ -98,7 +107,7 @@ def main() -> None:
         store.close()
 
 
-def _import_statement(store: PortfolioStore, path: Path, source: str) -> None:
+def _import_statement(store: PortfolioStore, path: Path, source: str) -> dict[str, object]:
     holdings = load_holdings(path)
     counts = store.upsert_holdings(holdings, source=source)
     income_count = 0
@@ -110,36 +119,172 @@ def _import_statement(store: PortfolioStore, path: Path, source: str) -> None:
         f"marked_missing={counts['marked_missing']}, "
         f"income_summaries={income_count}."
     )
+    return {
+        "holdings_count": len(holdings),
+        "accounts": {_holding_account_label(holding) for holding in holdings},
+        "account_statement_dates": _account_statement_dates(holdings),
+    }
 
 
-def _ingest_directory(store: PortfolioStore, path: Path, source: str) -> None:
+def _ingest_directory(store: PortfolioStore, path: Path, source: str, new_only: bool = False) -> dict[str, object]:
     if not path.exists():
         raise FileNotFoundError(f"Statement input directory does not exist: {path}")
     if not path.is_dir():
         raise NotADirectoryError(f"Expected a directory: {path}")
 
-    files = sorted(
-        file_path
-        for file_path in path.iterdir()
-        if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_STATEMENT_SUFFIXES
-    )
+    files = _statement_files(path)
     if not files:
         print(f"No supported statement files found in {path}. Supported: {sorted(SUPPORTED_STATEMENT_SUFFIXES)}")
-        return
+        return {"imported": 0, "failed": 0, "skipped_seen": 0, "imported_accounts": set(), "account_statement_dates": {}}
 
     imported = 0
+    skipped_seen = 0
+    imported_accounts: set[str] = set()
+    account_statement_dates: dict[str, set[date]] = {}
     failed: list[tuple[Path, str]] = []
+    imported_sources = store.imported_sources() if new_only else set()
+    imported_digests = store.imported_file_digests() if new_only else set()
     for file_path in files:
         try:
             file_source = source if source != "statement" else file_path.stem
-            _import_statement(store, file_path, file_source)
+            digest = _file_digest(file_path)
+            if new_only and (digest in imported_digests or file_source in imported_sources):
+                skipped_seen += 1
+                continue
+            import_result = _import_statement(store, file_path, file_source)
+            holdings_count = int(import_result["holdings_count"])
+            imported_accounts.update(str(account) for account in import_result["accounts"])
+            _merge_account_statement_dates(account_statement_dates, import_result["account_statement_dates"])
+            store.record_imported_file(file_path, file_source, digest, holdings_count)
+            imported_sources.add(file_source)
+            imported_digests.add(digest)
             imported += 1
         except Exception as exc:  # noqa: BLE001 - batch ingest should report all failures.
             failed.append((file_path, str(exc)))
 
-    print(f"Ingest complete. files_imported={imported}, files_failed={len(failed)}.")
+    print(f"Ingest complete. files_imported={imported}, files_skipped_seen={skipped_seen}, files_failed={len(failed)}.")
     for file_path, error in failed:
         print(f"  failed: {file_path} - {error}")
+    return {
+        "imported": imported,
+        "failed": len(failed),
+        "skipped_seen": skipped_seen,
+        "imported_accounts": imported_accounts,
+        "account_statement_dates": account_statement_dates,
+    }
+
+
+def _daily_loop(store: PortfolioStore, config: dict, input_path: Path, provider: str | None, timeout: int) -> None:
+    holdings = store.active_holdings()
+    input_files = _statement_files(input_path) if input_path.exists() and input_path.is_dir() else []
+    if not holdings and not input_files:
+        raise SystemExit(
+            "No active portfolio and no supported input files found. "
+            "Add real brokerage statements or a normalized holdings CSV under input/."
+        )
+
+    if input_files:
+        ingest_result = _ingest_directory(store, input_path, source="statement", new_only=True)
+    else:
+        print(f"No supported statement files found in {input_path}; using active portfolio database.")
+        ingest_result = {"imported": 0, "imported_accounts": set(), "account_statement_dates": {}}
+
+    if not store.active_holdings():
+        raise SystemExit("No active holdings found after ingestion. Add brokerage statements or a normalized holdings CSV.")
+
+    failed_prices = _refresh_prices(store, config, provider, timeout)
+    if failed_prices:
+        print("Some online price refreshes failed. Provide a manual price CSV for the failed symbols if needed.")
+    report_date = date.today()
+    account_values = store.latest_account_values()
+    current_value_accounts = _current_value_accounts(account_values, report_date)
+    active_account_statement_dates = _account_statement_dates(store.active_holdings())
+    broker_total_requests = _broker_total_requests(
+        active_account_statement_dates,
+        current_value_accounts,
+        report_date,
+    ) if ingest_result["imported"] else []
+    _analyze(
+        store,
+        config,
+        daily=True,
+        force_account_reconciliation=bool(current_value_accounts),
+        reconciliation_accounts=None,
+        broker_total_requests=broker_total_requests,
+        broker_check_mode="statement_import" if ingest_result["imported"] else "broker_totals",
+    )
+    _print_latest_report(report_dir(config), json_output=True)
+
+
+def _statement_files(path: Path) -> list[Path]:
+    if not path.exists() or not path.is_dir():
+        return []
+    return sorted(
+        file_path
+        for file_path in path.iterdir()
+        if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_STATEMENT_SUFFIXES
+    )
+
+
+def _file_digest(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _holding_account_label(holding) -> str:
+    return holding.broker if holding.broker else holding.account
+
+
+def _account_statement_dates(holdings) -> dict[str, set[date]]:
+    result: dict[str, set[date]] = {}
+    for holding in holdings:
+        result.setdefault(_holding_account_label(holding), set()).add(holding.statement_date)
+    return result
+
+
+def _merge_account_statement_dates(target: dict[str, set[date]], source) -> None:
+    for account, statement_dates in source.items():
+        target.setdefault(str(account), set()).update(statement_dates)
+
+
+def _account_value_as_of(value) -> date | None:
+    if not isinstance(value, dict):
+        return None
+    raw = value.get("as_of")
+    if not raw:
+        return None
+    return raw if isinstance(raw, date) else date.fromisoformat(str(raw))
+
+
+def _current_value_accounts(account_values: dict, report_date: date) -> set[str]:
+    return {
+        account
+        for account, value in account_values.items()
+        if _account_value_as_of(value) == report_date
+    }
+
+
+def _broker_total_requests(account_statement_dates, current_value_accounts: set[str], report_date: date) -> list[dict[str, str]]:
+    requests = []
+    for account, statement_dates in sorted(account_statement_dates.items()):
+        if account in current_value_accounts:
+            continue
+        latest_statement_date = max(statement_dates)
+        reason = "missing_current_broker_total"
+        if latest_statement_date != report_date:
+            reason = "statement_not_current_day"
+        requests.append(
+            {
+                "account": str(account),
+                "statement_as_of": latest_statement_date.isoformat(),
+                "required_as_of": report_date.isoformat(),
+                "reason": reason,
+            }
+        )
+    return requests
 
 
 def _print_holdings(store: PortfolioStore) -> None:
@@ -185,11 +330,11 @@ def _set_account_value(store: PortfolioStore, account: str, value: str, as_of: s
     print(f"Set account value: {account}={value} {currency} as_of={as_of_date.isoformat()}")
 
 
-def _refresh_prices(store: PortfolioStore, config: dict, provider: str | None, timeout: int) -> None:
+def _refresh_prices(store: PortfolioStore, config: dict, provider: str | None, timeout: int) -> int:
     holdings = store.active_holdings()
     if not holdings:
         print("No active holdings found. Import a statement first.")
-        return
+        return 0
     provider_name = provider or config.get("market_data", {}).get("provider", "yahoo")
     results = fetch_current_prices(holdings, f"{provider_name}:{timeout}")
     price_rows = [
@@ -208,23 +353,37 @@ def _refresh_prices(store: PortfolioStore, config: dict, provider: str | None, t
             f"  {failure.symbol} ({failure.provider_symbol}): "
             f"{failure.status} - {failure.message or 'no detail'}"
         )
+    return len(failures)
 
 
-def _analyze(store: PortfolioStore, config: dict, daily: bool) -> None:
+def _analyze(
+    store: PortfolioStore,
+    config: dict,
+    daily: bool,
+    force_account_reconciliation: bool = False,
+    reconciliation_accounts: set[str] | None = None,
+    broker_total_requests: list[dict[str, str]] | None = None,
+    broker_check_mode: str | None = None,
+) -> None:
     holdings = store.active_holdings()
     if not holdings:
         print("No active holdings found. Import a statement first.")
         return
 
-    previous = store.latest_snapshot()
-    previous_total = Decimal(previous["total_value"]) if previous else None
     if daily:
+        report_date = date.today()
+        previous = store.latest_snapshot_before(report_date)
+        previous_total = Decimal(previous["total_value"]) if previous else None
         report = build_daily_report(
             holdings,
             previous_total,
             config,
             store.latest_account_values(),
             store.latest_income_summaries(),
+            force_account_reconciliation=force_account_reconciliation,
+            reconciliation_accounts=reconciliation_accounts,
+            broker_total_requests=broker_total_requests,
+            broker_check_mode=broker_check_mode,
         )
         store.save_snapshot(date.fromisoformat(report["as_of"]), report["portfolio_value"])
     else:

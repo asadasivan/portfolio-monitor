@@ -8,6 +8,8 @@ from typing import Any
 
 from app.domain.models import Holding, IncomeSummary, QualityIssue
 
+AccountValue = Decimal | dict[str, Any]
+
 
 @dataclass(frozen=True)
 class Signal:
@@ -20,19 +22,37 @@ def build_daily_report(
     holdings: list[Holding],
     previous_total: Decimal | None,
     config: dict[str, Any],
-    account_values: dict[str, Decimal] | None = None,
+    account_values: dict[str, AccountValue] | None = None,
     income_summaries: list[IncomeSummary] | None = None,
+    force_account_reconciliation: bool = False,
+    reconciliation_accounts: set[str] | None = None,
+    broker_total_requests: list[dict[str, Any]] | None = None,
+    broker_check_mode: str | None = None,
 ) -> dict[str, Any]:
-    holdings_total = sum((holding.market_value for holding in holdings), Decimal("0"))
-    holdings_by_account = _sum_by_account_name(holdings)
-    by_account = _account_breakdown(holdings_by_account, account_values)
-    total = sum(by_account.values(), Decimal("0")) if account_values else holdings_total
-    by_asset_type = _sum_by_asset_type(holdings)
+    report_date = date.today()
+    applicable_account_values = _applicable_account_values(account_values, report_date)
+    reconciliation_account_values = _reconciliation_account_values(
+        account_values,
+        applicable_account_values,
+        force_account_reconciliation,
+        reconciliation_accounts,
+    )
+    holdings_total = sum((_market_value(holding, config) for holding in holdings), Decimal("0"))
+    holdings_by_account = _sum_by_account_name(holdings, config)
+    stale_account_values = _stale_account_values(
+        account_values,
+        report_date,
+        checked_accounts=set(reconciliation_account_values),
+        account_labels=set(holdings_by_account),
+    )
+    by_account = _account_breakdown(holdings_by_account, applicable_account_values, config)
+    total = sum(by_account.values(), Decimal("0")) if applicable_account_values else holdings_total
+    by_asset_type = _sum_by_asset_type(holdings, config)
     concentration = _concentration_alerts(holdings, total, config)
-    dividends = _dividend_summary(holdings)
+    dividends = _dividend_summary(holdings, config)
     actual_income = _actual_income_summary(income_summaries or [])
     holding_rows = _holding_rows(holdings, total, config)
-    reconciliation = _account_reconciliation(holdings_by_account, account_values)
+    reconciliation = _account_reconciliation(holdings_by_account, reconciliation_account_values, config)
     quality = _quality_summary(holdings, reconciliation)
     daily_change = None
     daily_change_pct = None
@@ -42,13 +62,19 @@ def build_daily_report(
 
     return {
         "report_type": "daily",
-        "as_of": date.today().isoformat(),
+        "as_of": report_date.isoformat(),
+        "base_currency": _base_currency(config),
+        "currency_conversion": _currency_conversion_summary(config),
         "portfolio_value": total,
         "holdings_value": holdings_total,
         "daily_change": daily_change,
         "daily_change_pct": daily_change_pct,
         "by_account": by_account,
         "account_reconciliation": reconciliation,
+        "broker_check_mode": broker_check_mode
+        or ("statement_import" if broker_total_requests else "broker_totals" if force_account_reconciliation else "current_price"),
+        "broker_total_requests": broker_total_requests or [],
+        "stale_account_values": stale_account_values,
         "quality": quality,
         "by_asset_type": by_asset_type,
         "concentration_alerts": concentration,
@@ -64,26 +90,36 @@ def build_daily_report(
 def build_monthly_report(
     holdings: list[Holding],
     config: dict[str, Any],
-    account_values: dict[str, Decimal] | None = None,
+    account_values: dict[str, AccountValue] | None = None,
     income_summaries: list[IncomeSummary] | None = None,
 ) -> dict[str, Any]:
-    holdings_total = sum((holding.market_value for holding in holdings), Decimal("0"))
-    holdings_by_account = _sum_by_account_name(holdings)
-    by_account = _account_breakdown(holdings_by_account, account_values)
-    total = sum(by_account.values(), Decimal("0")) if account_values else holdings_total
+    report_date = date.today()
+    applicable_account_values = _applicable_account_values(account_values, report_date)
+    holdings_total = sum((_market_value(holding, config) for holding in holdings), Decimal("0"))
+    holdings_by_account = _sum_by_account_name(holdings, config)
+    stale_account_values = _stale_account_values(
+        account_values,
+        report_date,
+        account_labels=set(holdings_by_account),
+    )
+    by_account = _account_breakdown(holdings_by_account, applicable_account_values, config)
+    total = sum(by_account.values(), Decimal("0")) if applicable_account_values else holdings_total
     signals = _sell_hold_signals(holdings, total, config)
-    reconciliation = _account_reconciliation(holdings_by_account, account_values)
+    reconciliation = _account_reconciliation(holdings_by_account, applicable_account_values, config)
     return {
         "report_type": "monthly",
-        "as_of": date.today().isoformat(),
+        "as_of": report_date.isoformat(),
+        "base_currency": _base_currency(config),
+        "currency_conversion": _currency_conversion_summary(config),
         "portfolio_value": total,
         "holdings_value": holdings_total,
         "by_account": by_account,
         "account_reconciliation": reconciliation,
+        "stale_account_values": stale_account_values,
         "quality": _quality_summary(holdings, reconciliation),
-        "by_asset_type": _sum_by_asset_type(holdings),
+        "by_asset_type": _sum_by_asset_type(holdings, config),
         "concentration_alerts": _concentration_alerts(holdings, total, config),
-        "dividends": _dividend_summary(holdings),
+        "dividends": _dividend_summary(holdings, config),
         "actual_income": _actual_income_summary(income_summaries or []),
         "holdings": _holding_rows(holdings, total, config),
         "signals": signals,
@@ -95,39 +131,42 @@ def build_monthly_report(
     }
 
 
-def _sum_by(holdings: list[Holding], field: str) -> dict[str, Decimal]:
+def _sum_by(holdings: list[Holding], field: str, config: dict[str, Any]) -> dict[str, Decimal]:
     totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
     for holding in holdings:
-        totals[getattr(holding, field)] += holding.market_value
+        totals[getattr(holding, field)] += _market_value(holding, config)
     return dict(sorted(totals.items()))
 
 
-def _sum_by_account_name(holdings: list[Holding]) -> dict[str, Decimal]:
+def _sum_by_account_name(holdings: list[Holding], config: dict[str, Any]) -> dict[str, Decimal]:
     totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
     for holding in holdings:
-        totals[_account_label(holding)] += holding.market_value
+        totals[_account_label(holding)] += _market_value(holding, config)
     return dict(sorted(totals.items()))
 
 
 def _account_breakdown(
     holdings_by_account: dict[str, Decimal],
-    account_values: dict[str, Decimal] | None,
+    account_values: dict[str, AccountValue] | None,
+    config: dict[str, Any],
 ) -> dict[str, Decimal]:
     if not account_values:
         return holdings_by_account
     combined = dict(holdings_by_account)
-    combined.update(account_values)
+    combined.update({account: _account_value_amount(value, config) for account, value in account_values.items()})
     return dict(sorted(combined.items()))
 
 
 def _account_reconciliation(
     holdings_by_account: dict[str, Decimal],
-    account_values: dict[str, Decimal] | None,
+    account_values: dict[str, AccountValue] | None,
+    config: dict[str, Any],
 ) -> list[dict[str, Decimal | str]]:
     if not account_values:
         return []
     rows: list[dict[str, Decimal | str]] = []
-    for account, reported_value in sorted(account_values.items()):
+    for account, account_value in sorted(account_values.items()):
+        reported_value = _account_value_amount(account_value, config)
         holdings_value = holdings_by_account.get(account, Decimal("0"))
         difference = reported_value - holdings_value
         difference_pct = (difference / reported_value) * Decimal("100") if reported_value else Decimal("0")
@@ -139,6 +178,97 @@ def _account_reconciliation(
                 "difference": difference,
                 "difference_pct": difference_pct,
                 "status": _reconciliation_status(difference, difference_pct),
+            }
+        )
+    return rows
+
+
+def _account_value_amount(value: AccountValue, config: dict[str, Any] | None = None) -> Decimal:
+    if not isinstance(value, dict):
+        return value
+    amount = value["current_value"] if isinstance(value["current_value"], Decimal) else Decimal(str(value["current_value"]))
+    currency = str(value.get("currency", _base_currency(config or {}))).upper()
+    if config is None:
+        return amount
+    return amount * _rates_to_base(config).get(currency, Decimal("1"))
+
+
+def _account_value_as_of(value: AccountValue) -> date | None:
+    if not isinstance(value, dict):
+        return None
+    raw = value.get("as_of")
+    if not raw:
+        return None
+    if isinstance(raw, date):
+        return raw
+    return date.fromisoformat(str(raw))
+
+
+def _applicable_account_values(
+    account_values: dict[str, AccountValue] | None,
+    report_date: date,
+) -> dict[str, AccountValue]:
+    if not account_values:
+        return {}
+    return {
+        account: value
+        for account, value in account_values.items()
+        if (as_of := _account_value_as_of(value)) is None or as_of == report_date
+    }
+
+
+def _reconciliation_account_values(
+    account_values: dict[str, AccountValue] | None,
+    applicable_account_values: dict[str, AccountValue],
+    force_account_reconciliation: bool,
+    reconciliation_accounts: set[str] | None,
+) -> dict[str, AccountValue]:
+    if not force_account_reconciliation:
+        return applicable_account_values
+    if not reconciliation_accounts:
+        return dict(applicable_account_values)
+    return {
+        account: value
+        for account, value in applicable_account_values.items()
+        if account in reconciliation_accounts
+    }
+
+
+def _stale_account_values(
+    account_values: dict[str, AccountValue] | None,
+    report_date: date,
+    checked_accounts: set[str] | None = None,
+    account_labels: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    account_values = account_values or {}
+    checked_accounts = checked_accounts or set()
+    account_labels = account_labels or set(account_values)
+    rows: list[dict[str, Any]] = []
+    for account in sorted(account_labels | set(account_values)):
+        if account in checked_accounts:
+            continue
+        value = account_values.get(account)
+        if value is None:
+            rows.append(
+                {
+                    "account": account,
+                    "reported_value": None,
+                    "as_of": "",
+                    "report_as_of": report_date.isoformat(),
+                    "status": "MISSING_CURRENT_TOTAL",
+                }
+            )
+            continue
+        as_of = _account_value_as_of(value)
+        if as_of is None or as_of == report_date:
+            continue
+        rows.append(
+            {
+                "account": account,
+                "reported_value": _account_value_amount(value),
+                "as_of": as_of.isoformat(),
+                "report_as_of": report_date.isoformat(),
+                "status": "SKIPPED_STALE",
             }
         )
     return rows
@@ -185,16 +315,16 @@ def _quality_issues(
     reconciliation: list[dict[str, Decimal | str]],
 ) -> list[QualityIssue]:
     issues: list[QualityIssue] = []
-    seen_symbols: set[tuple[str, str, str]] = set()
+    seen_symbols: set[tuple[str, str, str, str]] = set()
     for holding in holdings:
         account = _account_label(holding)
-        symbol_key = (account, holding.market, holding.symbol)
+        symbol_key = (holding.account, account, holding.market, holding.symbol)
         if symbol_key in seen_symbols:
             issues.append(
                 QualityIssue(
                     severity="warning",
                     code="DUPLICATE_ACTIVE_POSITION",
-                    message=f"{holding.symbol} appears more than once for {account}/{holding.market}.",
+                    message=f"{holding.symbol} appears more than once for {account}/{holding.account}/{holding.market}.",
                     remediation="Confirm whether the statement contains duplicate lots or whether the importer should aggregate this broker format.",
                     symbol=holding.symbol,
                     account=account,
@@ -261,36 +391,97 @@ def _quality_status(issues: list[QualityIssue]) -> str:
     return "OK"
 
 
-def _sum_by_asset_type(holdings: list[Holding]) -> dict[str, Decimal]:
+def _base_currency(config: dict[str, Any]) -> str:
+    return str(config.get("base_currency", "USD")).upper()
+
+
+def _rates_to_base(config: dict[str, Any]) -> dict[str, Decimal]:
+    conversion = config.get("currency_conversion", {})
+    rates = conversion.get("rates_to_base", {}) if isinstance(conversion, dict) else {}
+    if not isinstance(rates, dict) and isinstance(conversion, dict):
+        rates = {
+            currency: rate
+            for currency, rate in conversion.items()
+            if str(currency).upper() == str(currency) and currency != "rates_to_base"
+        }
+    result = {_base_currency(config): Decimal("1")}
+    for currency, rate in rates.items():
+        result[str(currency).upper()] = Decimal(str(rate))
+    return result
+
+
+def _currency_rate(holding: Holding, config: dict[str, Any]) -> Decimal:
+    return _rates_to_base(config).get(holding.currency.upper(), Decimal("1"))
+
+
+def _currency_conversion_summary(config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "base_currency": _base_currency(config),
+        "rates_to_base": _rates_to_base(config),
+    }
+
+
+def _market_value(holding: Holding, config: dict[str, Any]) -> Decimal:
+    return holding.market_value * _currency_rate(holding, config)
+
+
+def _cost_basis(holding: Holding, config: dict[str, Any]) -> Decimal | None:
+    if holding.cost_basis is None:
+        return None
+    return holding.cost_basis * _currency_rate(holding, config)
+
+
+def _price(holding: Holding, config: dict[str, Any]) -> Decimal | None:
+    if holding.current_price is None:
+        return None
+    return holding.current_price * _currency_rate(holding, config)
+
+
+def _native_amount(value: Decimal | None, holding: Holding, config: dict[str, Any]) -> Decimal | None:
+    if value is None or holding.currency.upper() == _base_currency(config):
+        return None
+    return value
+
+
+def _sum_by_asset_type(holdings: list[Holding], config: dict[str, Any]) -> dict[str, Decimal]:
     totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
     for holding in holdings:
-        totals[holding.normalized_asset_type] += holding.market_value
+        totals[_display_asset_type(holding.normalized_asset_type)] += _market_value(holding, config)
     return dict(sorted(totals.items()))
 
 
 def _holding_rows(holdings: list[Holding], total: Decimal, config: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for holding in holdings:
-        market_value = holding.market_value
-        gain_loss = _gain_loss(holding)
-        gain_loss_pct = _gain_loss_pct(holding, gain_loss)
+        market_value = _market_value(holding, config)
+        cost_basis = _cost_basis(holding, config)
+        gain_loss = _gain_loss(holding, config)
+        gain_loss_pct = _gain_loss_pct(cost_basis, gain_loss)
         portfolio_pct = (market_value / total) * Decimal("100") if total else Decimal("0")
         annual_dividend = (
-            holding.quantity * holding.annual_dividend_per_share
+            holding.quantity * holding.annual_dividend_per_share * _currency_rate(holding, config)
             if holding.annual_dividend_per_share is not None
             else None
         )
         rows.append(
             {
                 "account": _account_label(holding),
-                "symbol": holding.symbol,
-                "name": holding.name,
-                "asset_type": holding.normalized_asset_type,
+                "symbol": _display_symbol(holding),
+                "name": _display_name(holding),
+                "asset_type": _display_asset_type(holding.normalized_asset_type),
+                "market": holding.market.upper(),
                 "quantity": holding.quantity,
-                "price": holding.current_price,
+                "currency": holding.currency,
+                "base_currency": _base_currency(config),
+                "currency_rate": _currency_rate(holding, config),
+                "price": _price(holding, config),
+                "native_price": _native_amount(holding.current_price, holding, config),
                 "market_value": market_value,
-                "cost_basis": holding.cost_basis,
+                "native_market_value": _native_amount(holding.market_value, holding, config),
+                "cost_basis": cost_basis,
+                "native_cost_basis": _native_amount(holding.cost_basis, holding, config),
                 "gain_loss": gain_loss,
+                "native_gain_loss": _native_amount(_gain_loss_native(holding), holding, config),
                 "gain_loss_pct": gain_loss_pct,
                 "portfolio_pct": portfolio_pct,
                 "annual_dividend": annual_dividend,
@@ -306,16 +497,57 @@ def _account_label(holding: Holding) -> str:
     return holding.account
 
 
-def _gain_loss(holding: Holding) -> Decimal | None:
+def _display_symbol(holding: Holding) -> str:
+    if holding.normalized_asset_type != "mutual fund" or holding.market.upper() != "IN":
+        return holding.symbol
+    return _display_name(holding)
+
+
+def _display_name(holding: Holding) -> str:
+    if holding.normalized_asset_type != "mutual fund" or holding.market.upper() != "IN":
+        return holding.name
+    name = holding.name.strip() if holding.name else holding.symbol
+    replacements = {
+        " Reg ": " ",
+        " Reg(": "(",
+        " (G)": "",
+        "(G)": "",
+        "_G": "",
+    }
+    for old, new in replacements.items():
+        name = name.replace(old, new)
+    return " ".join(name.split())
+
+
+def _display_asset_type(asset_type: str) -> str:
+    labels = {
+        "mutual fund": "MF",
+        "etf": "ETF",
+        "stock": "Stock",
+        "crypto": "Crypto",
+        "cash": "Cash",
+    }
+    normalized = asset_type.strip().lower()
+    return labels.get(normalized, normalized.title())
+
+
+def _gain_loss(holding: Holding, config: dict[str, Any]) -> Decimal | None:
+    cost_basis = _cost_basis(holding, config)
+    if cost_basis is None:
+        return None
+    return _market_value(holding, config) - cost_basis
+
+
+def _gain_loss_native(holding: Holding) -> Decimal | None:
     if holding.cost_basis is None:
         return None
     return holding.market_value - holding.cost_basis
 
 
-def _gain_loss_pct(holding: Holding, gain_loss: Decimal | None) -> Decimal | None:
-    if gain_loss is None or holding.cost_basis is None or holding.cost_basis <= 0:
+def _gain_loss_pct(cost_basis: Decimal | None, gain_loss: Decimal | None) -> Decimal | None:
+    if gain_loss is None or cost_basis is None or cost_basis <= 0:
         return None
-    return (gain_loss / holding.cost_basis) * Decimal("100")
+    return (gain_loss / cost_basis) * Decimal("100")
 
 
 def _risk_status(holding: Holding, portfolio_pct: Decimal, config: dict[str, Any]) -> str:
@@ -348,10 +580,11 @@ def _concentration_alerts(holdings: list[Holding], total: Decimal, config: dict[
     alerts: list[str] = []
     crypto_total = Decimal("0")
     for holding in holdings:
-        pct = (holding.market_value / total) * Decimal("100")
+        market_value = _market_value(holding, config)
+        pct = (market_value / total) * Decimal("100")
         asset_type = holding.normalized_asset_type
         if asset_type == "crypto":
-            crypto_total += holding.market_value
+            crypto_total += market_value
         if asset_type == "stock" and pct >= max_single_stock:
             alerts.append(f"{holding.symbol} is {pct:.2f}% of portfolio, above {max_single_stock}% limit.")
         elif asset_type == "stock" and pct >= watch_single_stock:
@@ -364,11 +597,11 @@ def _concentration_alerts(holdings: list[Holding], total: Decimal, config: dict[
     return alerts
 
 
-def _dividend_summary(holdings: list[Holding]) -> dict[str, Decimal]:
+def _dividend_summary(holdings: list[Holding], config: dict[str, Any]) -> dict[str, Decimal]:
     annual = Decimal("0")
     for holding in holdings:
         if holding.annual_dividend_per_share:
-            annual += holding.quantity * holding.annual_dividend_per_share
+            annual += holding.quantity * holding.annual_dividend_per_share * _currency_rate(holding, config)
     return {
         "projected_annual": annual,
         "projected_monthly_average": annual / Decimal("12") if annual else Decimal("0"),
@@ -429,10 +662,12 @@ def _sell_hold_signals(holdings: list[Holding], total: Decimal, config: dict[str
 
     for holding in holdings:
         asset_type = holding.normalized_asset_type
-        pct = (holding.market_value / total) * Decimal("100")
+        market_value = _market_value(holding, config)
+        pct = (market_value / total) * Decimal("100")
         gain_loss_pct = None
-        if holding.cost_basis and holding.cost_basis > 0:
-            gain_loss_pct = ((holding.market_value - holding.cost_basis) / holding.cost_basis) * Decimal("100")
+        cost_basis = _cost_basis(holding, config)
+        if cost_basis and cost_basis > 0:
+            gain_loss_pct = ((market_value - cost_basis) / cost_basis) * Decimal("100")
 
         if asset_type == "stock" and pct >= max_single_stock:
             signals.append(

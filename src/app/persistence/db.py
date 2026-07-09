@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Iterable
 
 from app.domain.models import Holding, IncomeSummary
 
@@ -49,6 +49,15 @@ class PortfolioStore:
               holdings_count integer not null
             );
 
+            create table if not exists imported_files (
+              id integer primary key,
+              path text not null,
+              source text not null,
+              digest text not null unique,
+              imported_at text not null,
+              holdings_count integer not null
+            );
+
             create table if not exists daily_snapshots (
               id integer primary key,
               snapshot_date text not null unique,
@@ -82,6 +91,30 @@ class PortfolioStore:
             """
         )
         self.connection.commit()
+
+    def imported_sources(self) -> set[str]:
+        rows = self.connection.execute("select distinct source from statement_imports").fetchall()
+        return {row["source"] for row in rows}
+
+    def imported_file_digests(self) -> set[str]:
+        rows = self.connection.execute("select digest from imported_files").fetchall()
+        return {row["digest"] for row in rows}
+
+    def record_imported_file(self, path: Path, source: str, digest: str, holdings_count: int) -> None:
+        now = datetime.utcnow().isoformat(timespec="seconds")
+        with self.connection:
+            self.connection.execute(
+                """
+                insert into imported_files(path, source, digest, imported_at, holdings_count)
+                values (?, ?, ?, ?, ?)
+                on conflict(digest) do update set
+                  path=excluded.path,
+                  source=excluded.source,
+                  imported_at=excluded.imported_at,
+                  holdings_count=excluded.holdings_count
+                """,
+                (str(path), source, digest, now, holdings_count),
+            )
 
     def upsert_holdings(self, holdings: Iterable[Holding], source: str) -> dict[str, int]:
         now = datetime.utcnow().isoformat(timespec="seconds")
@@ -260,11 +293,18 @@ class PortfolioStore:
                 (account_label, str(current_value), currency, as_of.isoformat(), now),
             )
 
-    def latest_account_values(self) -> dict[str, Decimal]:
+    def latest_account_values(self) -> dict[str, dict[str, Decimal | str]]:
         rows = self.connection.execute(
-            "select account_label, current_value from account_values order by account_label"
+            "select account_label, current_value, currency, as_of from account_values order by account_label"
         ).fetchall()
-        return {row["account_label"]: Decimal(row["current_value"]) for row in rows}
+        return {
+            row["account_label"]: {
+                "current_value": Decimal(row["current_value"]),
+                "currency": row["currency"],
+                "as_of": row["as_of"],
+            }
+            for row in rows
+        }
 
     def upsert_income_summaries(self, summaries: Iterable[IncomeSummary]) -> int:
         now = datetime.utcnow().isoformat(timespec="seconds")
@@ -310,6 +350,17 @@ class PortfolioStore:
     def latest_snapshot(self) -> sqlite3.Row | None:
         return self.connection.execute(
             "select * from daily_snapshots order by snapshot_date desc limit 1"
+        ).fetchone()
+
+    def latest_snapshot_before(self, snapshot_date: date) -> sqlite3.Row | None:
+        return self.connection.execute(
+            """
+            select * from daily_snapshots
+            where snapshot_date < ?
+            order by snapshot_date desc
+            limit 1
+            """,
+            (snapshot_date.isoformat(),),
         ).fetchone()
 
     def save_snapshot(self, snapshot_date: date, total_value: Decimal) -> None:

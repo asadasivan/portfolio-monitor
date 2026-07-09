@@ -23,6 +23,9 @@ def load_pdf(path: Path) -> list[Holding]:
             text_pages.append(page.extract_text(x_tolerance=1, y_tolerance=3) or "")
 
     full_text = "\n".join(text_pages)
+    indian_mf_holdings = _parse_indian_mutual_fund_valuation(full_text, broker=_pdf_broker(full_text))
+    if indian_mf_holdings:
+        return _combine_holdings(indian_mf_holdings)
     if "Crypto Statement" in full_text and "CRYPTOCURRENCY HELD IN ACCOUNT" in full_text:
         return _combine_holdings(_parse_robinhood_crypto(full_text))
     if "Securities Held in Account Sym/Cusip" in full_text:
@@ -121,6 +124,80 @@ def _parse_robinhood_crypto(text: str) -> list[Holding]:
             )
         )
     return holdings
+
+
+def _parse_indian_mutual_fund_valuation(text: str, broker: str = "Unknown") -> list[Holding]:
+    holdings: list[Holding] = []
+    account = "Indian Mutual Funds"
+    current_date = date.today()
+    in_valuation = False
+    valuation_row = re.compile(
+        r"^(?P<folio>\S+)\s+"
+        r"(?P<scheme>.+?)\s+"
+        r"(?P<subcategory>(?:Equity|Debt|Hybrid|Other):\s+.+?)\s+"
+        r"(?P<units>[\d,]+(?:\.\d+)?)\s+"
+        r"(?P<cost>[\d,]+(?:\.\d+)?)\s+"
+        r"(?P<value>[\d,]+(?:\.\d+)?)$"
+    )
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if re.match(r"^.+?\s+\(PAN\s*:", line):
+            continue
+
+        valuation_match = re.match(r"^Valuation Report as on\s+(\d{2})/(\d{2})/(\d{4})$", line)
+        if valuation_match:
+            day, month, year = valuation_match.groups()
+            current_date = date(int(year), int(month), int(day))
+            in_valuation = True
+            continue
+
+        if in_valuation and line.startswith("Mutual Fund Total"):
+            in_valuation = False
+            continue
+        if not in_valuation or line in {"Mutual Fund", "Folio Scheme / Scrip Sub Category"}:
+            continue
+        if line.startswith("Balance ") or line.startswith("Units ") or line.startswith("Page "):
+            continue
+
+        match = valuation_row.match(line)
+        if not match:
+            continue
+        units = _to_decimal(match.group("units"))
+        market_value = _to_decimal(match.group("value"))
+        holdings.append(
+            Holding(
+                account=account,
+                broker=broker,
+                market="IN",
+                symbol=_sift_symbol(match.group("folio"), match.group("scheme")),
+                name=match.group("scheme").strip(),
+                asset_type="Mutual Fund",
+                quantity=units,
+                cost_basis=_to_decimal(match.group("cost")),
+                current_price=(market_value / units) if units else None,
+                currency="INR",
+                sector=match.group("subcategory").strip(),
+                statement_date=current_date,
+                annual_dividend_per_share=Decimal("0"),
+            )
+        )
+    return holdings
+
+
+def _pdf_broker(text: str) -> str:
+    if "SIFT CAPITAL" in text:
+        return "Sift Capital"
+    return "Unknown"
+
+
+def _sift_symbol(folio: str, scheme: str) -> str:
+    scheme_slug = re.sub(r"[^A-Z0-9]+", "_", scheme.upper()).strip("_")
+    folio_slug = re.sub(r"[^A-Z0-9]+", "_", folio.upper()).strip("_")
+    return f"MF_{folio_slug}_{scheme_slug}"[:120]
 
 
 def _parse_robinhood_securities(text: str) -> list[Holding]:

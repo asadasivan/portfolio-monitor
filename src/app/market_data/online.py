@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -41,7 +42,21 @@ def fetch_current_prices(holdings: list[Holding], provider: str) -> list[PriceRe
         timeout_seconds = int(timeout_text)
     provider_name = provider.lower()
     if provider_name == "yahoo":
-        return cash_results + _fetch_yahoo_prices(market_holdings, timeout_seconds=timeout_seconds)
+        india_mfs, other_holdings = _split_indian_mutual_funds(market_holdings)
+        return (
+            cash_results
+            + _fetch_yahoo_prices(other_holdings, timeout_seconds=timeout_seconds)
+            + _fetch_amfi_prices(india_mfs, timeout_seconds=timeout_seconds)
+        )
+    if provider_name in {"yahoo-amfi", "hybrid"}:
+        india_mfs, other_holdings = _split_indian_mutual_funds(market_holdings)
+        return (
+            cash_results
+            + _fetch_yahoo_prices(other_holdings, timeout_seconds=timeout_seconds)
+            + _fetch_amfi_prices(india_mfs, timeout_seconds=timeout_seconds)
+        )
+    if provider_name == "amfi":
+        return cash_results + _fetch_amfi_prices(market_holdings, timeout_seconds=timeout_seconds)
     if provider_name == "yfinance":
         return cash_results + _fetch_yfinance_prices(market_holdings)
     raise ValueError(f"Unsupported online price provider: {provider}")
@@ -101,6 +116,159 @@ def _fetch_yahoo_prices(holdings: list[Holding], timeout_seconds: int) -> list[P
                 )
             )
     return results
+
+
+def _split_indian_mutual_funds(holdings: list[Holding]) -> tuple[list[Holding], list[Holding]]:
+    india_mfs: list[Holding] = []
+    other_holdings: list[Holding] = []
+    for holding in holdings:
+        if holding.market.upper() == "IN" and holding.normalized_asset_type == "mutual fund":
+            india_mfs.append(holding)
+        else:
+            other_holdings.append(holding)
+    return india_mfs, other_holdings
+
+
+def _fetch_amfi_prices(holdings: list[Holding], timeout_seconds: int) -> list[PriceResult]:
+    if not holdings:
+        return []
+    try:
+        nav_rows = _fetch_amfi_nav_rows(timeout_seconds)
+    except (HTTPError, URLError, TimeoutError, socket.timeout, OSError) as exc:
+        return [
+            PriceResult(
+                symbol=holding.symbol,
+                market=holding.market,
+                current_price=None,
+                provider_symbol="AMFI",
+                status="error",
+                message=str(exc),
+            )
+            for holding in holdings
+        ]
+
+    return [_match_amfi_price(holding, nav_rows) for holding in holdings]
+
+
+def _fetch_amfi_nav_rows(timeout_seconds: int) -> list[dict[str, str]]:
+    url = "https://www.amfiindia.com/spages/NAVAll.txt"
+    request = Request(url, headers={"User-Agent": "portfolio-monitor/0.1"})
+    with urlopen(request, timeout=timeout_seconds) as response:
+        text = response.read().decode("utf-8", errors="replace")
+    rows: list[dict[str, str]] = []
+    for line in text.splitlines():
+        parts = [part.strip() for part in line.split(";")]
+        if len(parts) != 6 or parts[0] == "Scheme Code":
+            continue
+        price = _to_decimal(parts[4])
+        if price is None:
+            continue
+        rows.append({"code": parts[0], "name": parts[3], "nav": parts[4], "date": parts[5]})
+    return rows
+
+
+def _match_amfi_price(holding: Holding, nav_rows: list[dict[str, str]]) -> PriceResult:
+    holding_tokens = _scheme_tokens(holding.name)
+    holding_core = _scheme_core(holding.name)
+    best_row: dict[str, str] | None = None
+    best_score = 0
+    for row in nav_rows:
+        nav_tokens = _scheme_tokens(row["name"])
+        nav_core = _scheme_core(row["name"])
+        if not holding_tokens:
+            continue
+        common = len(holding_tokens & nav_tokens)
+        missing = len(holding_tokens - nav_tokens)
+        score = common * 3 - missing * 2
+        holding_is_regular = _is_regular_plan_name(holding.name)
+        holding_is_growth = _is_growth_name(holding.name)
+        nav_name = row["name"].lower()
+        nav_price = _to_decimal(row["nav"])
+        nav_is_direct = "direct" in nav_name
+        nav_is_regular = "regular" in nav_name or re.search(r"\breg\b", nav_name) is not None
+        nav_is_growth = "growth" in nav_name
+        nav_is_distribution = "idcw" in nav_name or "bonus" in nav_name or "dividend" in nav_name
+        if holding_core and holding_core in nav_core:
+            score += 15
+        elif common >= max(2, len(holding_tokens) - 1):
+            score += 2
+        else:
+            continue
+        if holding_is_regular and nav_is_direct:
+            score -= 8
+        if holding_is_regular and nav_is_regular:
+            score += 3
+        if holding_is_growth and nav_is_growth:
+            score += 4
+        if holding_is_growth and nav_is_distribution:
+            score -= 6
+        if holding.current_price and nav_price:
+            relative_diff = abs(nav_price - holding.current_price) / holding.current_price
+            score -= int(relative_diff * 100)
+        if score > best_score:
+            best_row = row
+            best_score = score
+
+    if not best_row:
+        return PriceResult(
+            symbol=holding.symbol,
+            market=holding.market,
+            current_price=None,
+            provider_symbol="AMFI",
+            status="not_found",
+            message=f"AMFI did not find a close scheme match for {holding.name}.",
+        )
+
+    return PriceResult(
+        symbol=holding.symbol,
+        market=holding.market,
+        current_price=_to_decimal(best_row["nav"]),
+        provider_symbol=f"AMFI:{best_row['code']}",
+        status="ok",
+        message=best_row["name"],
+    )
+
+
+def _scheme_tokens(name: str) -> set[str]:
+    tokens = set(_scheme_core(name).split())
+    stop_words = {
+        "fund",
+        "plan",
+        "option",
+        "regular",
+        "reg",
+        "direct",
+        "idcw",
+        "bonus",
+        "dividend",
+        "the",
+        "and",
+        "of",
+    }
+    return tokens - stop_words
+
+
+def _scheme_core(name: str) -> str:
+    normalized = name.lower()
+    normalized = normalized.replace("&", " and ")
+    normalized = re.sub(r"\blargecap\b", "large cap", normalized)
+    normalized = re.sub(r"\bmidcap\b", "mid cap", normalized)
+    normalized = re.sub(r"\bsmallcap\b", "small cap", normalized)
+    normalized = re.sub(r"\bflexicap\b", "flexi cap", normalized)
+    normalized = re.sub(r"\bmulticap\b", "multi cap", normalized)
+    normalized = re.sub(r"\(g\)", " ", normalized)
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return " ".join(normalized.split())
+
+
+def _is_regular_plan_name(name: str) -> bool:
+    normalized = name.lower()
+    return " reg " in f" {normalized} " or "regular" in normalized
+
+
+def _is_growth_name(name: str) -> bool:
+    normalized = name.lower()
+    return "(g)" in normalized or "growth" in normalized
 
 
 def _fetch_yahoo_price(symbol: str, timeout_seconds: int) -> Decimal | None:

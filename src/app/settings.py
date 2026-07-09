@@ -10,6 +10,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "database_path": "data/portfolio.db",
     "report_dir": "reports",
     "base_currency": "USD",
+    "currency_conversion": {
+        "rates_to_base": {
+            "USD": 1,
+            "INR": 0.012,
+        }
+    },
     "risk_profile": {
         "name": "moderate_growth",
         "max_single_stock_pct": 10,

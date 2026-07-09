@@ -25,6 +25,14 @@ def _number(value: Any) -> str:
     return f"{decimal:,.2f}"
 
 
+def _money_with_native(value: Any, native_value: Any = None, native_currency: Any = None) -> str:
+    text = _number(value)
+    native_decimal = _decimal(native_value)
+    if native_decimal is None or not native_currency:
+        return text
+    return f"{text} ({escape(str(native_currency))} {native_decimal:,.2f})"
+
+
 def _pct(value: Any) -> str:
     decimal = _decimal(value)
     if decimal is None:
@@ -37,6 +45,14 @@ def _signed_class(value: Any) -> str:
     if decimal is None or decimal == 0:
         return ""
     return "positive" if decimal > 0 else "negative"
+
+
+def _negative_row_class(*values: Any) -> str:
+    for value in values:
+        decimal = _decimal(value)
+        if decimal is not None and decimal < 0:
+            return "negative-row"
+    return ""
 
 
 def _risk_class(status: Any) -> str:
@@ -113,6 +129,9 @@ def _issue_severity_label(severity: Any) -> str:
 
 def _report_checks(report: dict[str, Any]) -> str:
     reconciliation = report.get("account_reconciliation", [])
+    stale_account_values = report.get("stale_account_values", [])
+    broker_total_requests = report.get("broker_total_requests", [])
+    broker_check_mode = report.get("broker_check_mode", "current_price")
     quality = report.get("quality", {})
     issues = quality.get("issues", [])
     quality_status = str(quality.get("status", "UNKNOWN"))
@@ -120,7 +139,10 @@ def _report_checks(report: dict[str, Any]) -> str:
     if reconciliation:
         matched = sum(1 for item in reconciliation if str(item.get("status", "")).upper() == "MATCHED")
         recon_status = "MATCHED" if matched == len(reconciliation) else "REVIEW"
-        recon_detail = f"{matched}/{len(reconciliation)} accounts matched"
+        if broker_check_mode == "statement_import":
+            recon_detail = f"{matched}/{len(reconciliation)} accounts matched after new statement import"
+        else:
+            recon_detail = f"{matched}/{len(reconciliation)} accounts matched"
         recon_table = _simple_table(
             ["Account", "Reported", "Parsed", "Diff", "Status"],
             [
@@ -135,6 +157,40 @@ def _report_checks(report: dict[str, Any]) -> str:
             ],
         )
         recon_details = f"<details><summary>View reconciliation</summary>{recon_table}</details>"
+    elif broker_total_requests:
+        recon_status = "NEEDED"
+        recon_detail = "Current broker totals are needed before reconciliation can run for newly imported statements."
+        request_table = _simple_table(
+            ["Account", "Statement As Of", "Required As Of", "Reason"],
+            [
+                [
+                    item.get("account", ""),
+                    item.get("statement_as_of", ""),
+                    item.get("required_as_of", ""),
+                    item.get("reason", ""),
+                ]
+                for item in broker_total_requests
+            ],
+        )
+        recon_details = f"<details><summary>View needed broker totals</summary>{request_table}</details>"
+    elif stale_account_values:
+        has_missing = any(str(item.get("status", "")).upper() == "MISSING_CURRENT_TOTAL" for item in stale_account_values)
+        recon_status = "NEEDED" if has_missing else "SKIPPED"
+        recon_detail = "Broker totals are missing or older than this current-price report, so reconciliation was skipped."
+        stale_table = _simple_table(
+            ["Account", "Reported", "Broker As Of", "Report As Of", "Status"],
+            [
+                [
+                    item.get("account", ""),
+                    _number(item.get("reported_value")),
+                    item.get("as_of", ""),
+                    item.get("report_as_of", ""),
+                    item.get("status", ""),
+                ]
+                for item in stale_account_values
+            ],
+        )
+        recon_details = f"<details><summary>View broker totals</summary>{stale_table}</details>"
     else:
         recon_status = "NOT SET"
         recon_detail = "No Fidelity/Robinhood app totals were entered for comparison."
@@ -203,29 +259,98 @@ def _risk_alerts(report: dict[str, Any]) -> str:
     return f'<section class="section-risk"><h2>Risk Alerts</h2><ul>{items}</ul></section>'
 
 
-def _holdings_table(report: dict[str, Any]) -> str:
-    rows = []
-    for holding in report.get("holdings", []):
-        gain_loss = holding.get("gain_loss")
-        gain_loss_pct = holding.get("gain_loss_pct")
-        rows.append(
-            "<tr>"
-            + _td(holding.get("account", ""))
-            + _td(holding.get("asset_type", ""))
-            + _td(holding.get("symbol", ""))
-            + _td(_number(holding.get("price")))
-            + _td(_number(holding.get("market_value")))
-            + _td(_number(holding.get("cost_basis")))
-            + _td(_number(gain_loss), _signed_class(gain_loss))
-            + _td(_pct(gain_loss_pct), _signed_class(gain_loss_pct))
-            + _td(_pct(holding.get("portfolio_pct")))
-            + _td(_number(holding.get("annual_dividend")))
-            + "</tr>"
+def _holding_row(holding: dict[str, Any]) -> str:
+    gain_loss = holding.get("gain_loss")
+    gain_loss_pct = holding.get("gain_loss_pct")
+    row_class = _negative_row_class(gain_loss, gain_loss_pct)
+    class_attr = f' class="{row_class}"' if row_class else ""
+    return (
+        f"<tr{class_attr}>"
+        + _td(holding.get("account", ""))
+        + _td(holding.get("asset_type", ""))
+        + _td(holding.get("symbol", ""))
+        + _td(_number(holding.get("quantity")))
+        + _td(_money_with_native(holding.get("price"), holding.get("native_price"), holding.get("currency")))
+        + _td(
+            _money_with_native(
+                holding.get("market_value"),
+                holding.get("native_market_value"),
+                holding.get("currency"),
+            )
         )
+        + _td(_money_with_native(holding.get("cost_basis"), holding.get("native_cost_basis"), holding.get("currency")))
+        + _td(
+            _money_with_native(gain_loss, holding.get("native_gain_loss"), holding.get("currency")),
+            _signed_class(gain_loss),
+        )
+        + _td(_pct(gain_loss_pct), _signed_class(gain_loss_pct))
+        + _td(_pct(holding.get("portfolio_pct")))
+        + _td(_number(holding.get("annual_dividend")))
+        + "</tr>"
+    )
+
+
+def _sum_optional(holdings: list[dict[str, Any]], field: str) -> Decimal | None:
+    values = [_decimal(holding.get(field)) for holding in holdings]
+    present = [value for value in values if value is not None]
+    if not present:
+        return None
+    return sum(present, Decimal("0"))
+
+
+def _single_native_currency(holdings: list[dict[str, Any]]) -> str | None:
+    currencies = {
+        str(holding.get("currency"))
+        for holding in holdings
+        if holding.get("native_market_value") is not None and holding.get("currency")
+    }
+    if len(currencies) == 1:
+        return next(iter(currencies))
+    return None
+
+
+def _holding_total_row(holdings: list[dict[str, Any]]) -> str:
+    market_value = _sum_optional(holdings, "market_value")
+    cost_basis = _sum_optional(holdings, "cost_basis")
+    gain_loss = _sum_optional(holdings, "gain_loss")
+    gain_loss_pct = (gain_loss / cost_basis) * Decimal("100") if gain_loss is not None and cost_basis else None
+    portfolio_pct = _sum_optional(holdings, "portfolio_pct")
+    annual_dividend = _sum_optional(holdings, "annual_dividend")
+    native_currency = _single_native_currency(holdings)
+    native_market_value = _sum_optional(holdings, "native_market_value") if native_currency else None
+    native_cost_basis = _sum_optional(holdings, "native_cost_basis") if native_currency else None
+    native_gain_loss = _sum_optional(holdings, "native_gain_loss") if native_currency else None
+    row_class = "total-row"
+    if _negative_row_class(gain_loss):
+        row_class += " negative-row"
+    return (
+        f'<tr class="{row_class}">'
+        + _td("Total")
+        + _td("")
+        + _td("")
+        + _td("")
+        + _td("")
+        + _td(_money_with_native(market_value, native_market_value, native_currency))
+        + _td(_money_with_native(cost_basis, native_cost_basis, native_currency))
+        + _td(_money_with_native(gain_loss, native_gain_loss, native_currency), _signed_class(gain_loss))
+        + _td(_pct(gain_loss_pct), _signed_class(gain_loss_pct))
+        + _td(_pct(portfolio_pct))
+        + _td(_number(annual_dividend))
+        + "</tr>"
+    )
+
+
+def _holding_table_section(title: str, holdings: list[dict[str, Any]]) -> str:
+    rows = [_holding_row(holding) for holding in holdings]
+    if not rows:
+        rows = ['<tr><td colspan="11" class="muted">No holdings in this category.</td></tr>']
+    else:
+        rows.append(_holding_total_row(holdings))
     headers = [
         "Account",
         "Type",
         "Symbol",
+        "Units",
         "Last Price",
         "Market Value",
         "Cost Basis",
@@ -235,12 +360,37 @@ def _holdings_table(report: dict[str, Any]) -> str:
         "Est. Annual Dividend",
     ]
     return (
-        "<section class=\"section-holdings\"><h2>Holdings Detail</h2><table data-interactive='true'><thead><tr>"
+        f'<section class="section-holdings"><h2>{escape(title)}</h2><table data-interactive="true"><thead><tr>'
         + "".join(_th(header) for header in headers)
         + "</tr></thead><tbody>"
         + "".join(rows)
         + "</tbody></table></section>"
     )
+
+
+def _holdings_tables(report: dict[str, Any]) -> str:
+    holdings = list(report.get("holdings", []))
+    us_stock_etf = [
+        holding
+        for holding in holdings
+        if holding.get("market") == "US" and holding.get("asset_type") in {"Stock", "ETF"}
+    ]
+    india_mf_stock = [
+        holding
+        for holding in holdings
+        if holding.get("market") == "IN" and holding.get("asset_type") in {"MF", "Stock"}
+    ]
+    crypto = [holding for holding in holdings if holding.get("asset_type") == "Crypto"]
+    categorized = {id(holding) for holding in [*us_stock_etf, *india_mf_stock, *crypto]}
+    other = [holding for holding in holdings if id(holding) not in categorized]
+    sections = [
+        _holding_table_section("US Stocks and ETF", us_stock_etf),
+        _holding_table_section("India MF and Stocks", india_mf_stock),
+        _holding_table_section("Crypto", crypto),
+    ]
+    if other:
+        sections.append(_holding_table_section("Other Holdings", other))
+    return "".join(sections)
 
 
 def _risk_by_holding_table(report: dict[str, Any]) -> str:
@@ -824,8 +974,14 @@ def write_html_report(report: dict[str, Any], report_dir: Path) -> Path:
       color: var(--header);
     }}
     tr:last-child td {{ border-bottom: 0; }}
+    .total-row td {{
+      border-top: 2px solid var(--header);
+      font-weight: 750;
+      background: #f8fafc;
+    }}
     .positive {{ color: var(--good); }}
     .negative {{ color: var(--bad); }}
+    .negative-row td {{ color: var(--bad); }}
     .risk-breach {{ color: var(--bad); font-weight: 650; }}
     .risk-watch {{ color: var(--watch); font-weight: 650; }}
     .risk-ok {{ color: var(--muted); }}
@@ -856,7 +1012,7 @@ def write_html_report(report: dict[str, Any], report_dir: Path) -> Path:
     {_account_breakdown(report)}
     {_asset_breakdown(report)}
     {_risk_alerts(report)}
-    {_holdings_table(report)}
+    {_holdings_tables(report)}
     {_risk_by_holding_table(report)}
     {_dividend_estimate(report)}
     <section class="section-disclaimer">
