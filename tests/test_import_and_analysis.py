@@ -9,7 +9,7 @@ from app.analysis import build_daily_report, build_monthly_report
 from app.ingestion import load_holdings
 from app.ingestion.pdf_importer import _parse_indian_mutual_fund_valuation
 from app.market_data import provider_symbol
-from app.market_data.online import _split_indian_mutual_funds
+from app.market_data.online import fetch_fx_rates, _split_indian_mutual_funds
 from app.domain.models import Holding
 from app.reporting.compact import render_ai_json, render_compact, render_manifest
 from app.reporting.html import write_html_report
@@ -128,6 +128,37 @@ def test_provider_symbol_maps_crypto_and_india_symbols() -> None:
         annual_dividend_per_share=Decimal("10"),
     )
     assert provider_symbol(india_holding) == "RELIANCE.NS"
+
+
+def test_fetch_fx_rates_uses_direct_yahoo_pair(monkeypatch) -> None:
+    def fake_fetch(symbol: str, timeout_seconds: int) -> Decimal | None:
+        assert timeout_seconds == 7
+        return {"EURUSD=X": Decimal("1.09")}.get(symbol)
+
+    monkeypatch.setattr("app.market_data.online._fetch_yahoo_price", fake_fetch)
+
+    results = fetch_fx_rates("USD", {"EUR"}, "yahoo:7")
+
+    assert results[0].currency == "EUR"
+    assert results[0].base_currency == "USD"
+    assert results[0].rate_to_base == Decimal("1.09")
+    assert results[0].provider_symbol == "EURUSD=X"
+    assert results[0].status == "ok"
+
+
+def test_fetch_fx_rates_uses_inverse_yahoo_pair(monkeypatch) -> None:
+    def fake_fetch(symbol: str, timeout_seconds: int) -> Decimal | None:
+        return {"USDINR=X": Decimal("83.3333333333")}.get(symbol)
+
+    monkeypatch.setattr("app.market_data.online._fetch_yahoo_price", fake_fetch)
+
+    results = fetch_fx_rates("USD", {"INR"}, "yahoo")
+
+    assert results[0].currency == "INR"
+    assert results[0].provider_symbol == "USDINR=X"
+    assert results[0].status == "ok"
+    assert results[0].rate_to_base is not None
+    assert results[0].rate_to_base.quantize(Decimal("0.0001")) == Decimal("0.0120")
 
 
 def test_sift_capital_valuation_report_parses_mutual_fund_holdings() -> None:
@@ -385,6 +416,33 @@ def test_html_report_uses_configured_output_currency(tmp_path: Path) -> None:
     assert "Value (INR)" in html
     assert "Market Value (INR)" in html
     assert "2,083,333.33" in html
+
+
+def test_html_report_supports_common_output_currency_labels(tmp_path: Path) -> None:
+    config = _config()
+    config["base_currency"] = "USD"
+    config["currency_conversion"] = {"rates_to_base": {"USD": 1, "EUR": "1.25", "GBP": "1.5", "JPY": "0.01"}}
+    config["reporting"] = {"output_currency": "EUR"}
+
+    report = build_daily_report(_holdings()[:1], None, config)
+    html = write_html_report(report, tmp_path).read_text(encoding="utf-8")
+
+    assert "Portfolio Value (€)" in html
+    assert "Value (€)" in html
+    assert "20,000.00" in html
+
+
+def test_html_report_falls_back_to_base_currency_when_output_rate_is_missing(tmp_path: Path) -> None:
+    config = _config()
+    config["base_currency"] = "USD"
+    config["currency_conversion"] = {"rates_to_base": {"USD": 1}}
+    config["reporting"] = {"output_currency": "GBP"}
+
+    report = build_daily_report(_holdings()[:1], None, config)
+    html = write_html_report(report, tmp_path).read_text(encoding="utf-8")
+
+    assert "Portfolio Value ($)" in html
+    assert "Portfolio Value (£)" not in html
 
 
 def test_report_accepts_fallback_flattened_currency_config() -> None:

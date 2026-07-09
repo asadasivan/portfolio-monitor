@@ -20,7 +20,7 @@ The primary workflow is: create a local project in your AI assistant, place your
 - It does not log in to brokerage accounts.
 - It does not scrape broker websites.
 - It supports portfolio tracking and performance analysis, but it does not provide investment, tax, legal, or trading advice.
-- It does not fetch live foreign exchange rates automatically; configure conversion rates locally.
+- It does not guarantee live market or FX data availability; configured/manual values remain the fallback.
 
 ## Start Here
 
@@ -30,6 +30,7 @@ Use the [AI Assistant Usage Guide](docs/USAGE.md). It contains the setup command
 
 - [AI Assistant Usage Guide](docs/USAGE.md): primary AI assistant workflow.
 - [Input Formats](docs/INPUT_FORMATS.md): holdings CSV, manual prices, cost basis, and account reconciliation inputs.
+- [Reports](docs/REPORTS.md): report files, checks, output currency, FX refresh, and interpretation.
 - [Security](SECURITY.md): privacy model, local data handling, and what must not be committed.
 
 ## Project Structure
@@ -51,13 +52,9 @@ scripts/                 assistant-friendly helper scripts
 tests/                   focused unit tests
 ```
 
-## Report Checks
+## Reports
 
-The HTML report includes compact checks near the top:
-
-- **Broker total check** compares the tool's parsed account value with the total value you see in the broker app or statement. If it says `NOT SET`, no broker-reported totals have been entered yet.
-- **Data quality** summarizes import gaps. `Needs review` means the report found a data issue that may affect trust in the numbers. `Missing optional data` usually means gain/loss or tax-lot analysis is incomplete because cost basis is missing.
-- **Price freshness** tells you whether values are based on stored/imported prices. Refresh prices or import a manual price CSV before relying on current day movement.
+See [Reports](docs/REPORTS.md) for generated files, report checks, holdings tables, output-currency settings, live FX refresh behavior, and interpretation guidance.
 
 ## Add Cost Basis
 
@@ -81,7 +78,7 @@ See [Security](SECURITY.md) for the canonical list of sensitive files that must 
 ## Known Limitations
 
 - Yahoo Finance data may be delayed, unavailable, or inconsistent with broker quotes.
-- Currency conversion is not implemented.
+- Foreign exchange rates are fetched from Yahoo during the daily loop when possible, but configured rates remain the fallback.
 - Gain/loss and tax-related fields are tracking inputs only, not tax filing guidance.
 - Dividend estimates use imported annual income values when available; they are not guaranteed forecasts.
 

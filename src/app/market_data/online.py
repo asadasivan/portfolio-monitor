@@ -11,12 +11,45 @@ from decimal import Decimal, InvalidOperation
 
 from app.domain.models import Holding
 
+SUPPORTED_FX_CURRENCIES = {
+    "USD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "INR",
+    "CAD",
+    "AUD",
+    "CHF",
+    "CNY",
+    "HKD",
+    "SGD",
+    "NZD",
+    "SEK",
+    "NOK",
+    "KRW",
+    "AED",
+    "SAR",
+    "ZAR",
+    "BRL",
+    "MXN",
+}
+
 
 @dataclass(frozen=True)
 class PriceResult:
     symbol: str
     market: str
     current_price: Decimal | None
+    provider_symbol: str
+    status: str
+    message: str | None = None
+
+
+@dataclass(frozen=True)
+class FxRateResult:
+    currency: str
+    base_currency: str
+    rate_to_base: Decimal | None
     provider_symbol: str
     status: str
     message: str | None = None
@@ -62,6 +95,28 @@ def fetch_current_prices(holdings: list[Holding], provider: str) -> list[PriceRe
     raise ValueError(f"Unsupported online price provider: {provider}")
 
 
+def fetch_fx_rates(base_currency: str, currencies: set[str], provider: str) -> list[FxRateResult]:
+    timeout_seconds = 6
+    if ":" in provider:
+        provider, timeout_text = provider.split(":", 1)
+        timeout_seconds = int(timeout_text)
+    provider_name = provider.lower()
+    if provider_name not in {"yahoo", "yahoo-amfi", "hybrid", "yfinance"}:
+        raise ValueError(f"Unsupported online FX provider: {provider}")
+
+    base = base_currency.upper()
+    results: list[FxRateResult] = []
+    for currency in sorted({item.upper() for item in currencies}):
+        if currency == base:
+            results.append(FxRateResult(currency, base, Decimal("1"), currency, "ok"))
+            continue
+        if currency not in SUPPORTED_FX_CURRENCIES:
+            results.append(FxRateResult(currency, base, None, currency, "unsupported", "Currency is not in the supported FX list."))
+            continue
+        results.append(_fetch_yahoo_fx_rate(currency, base, timeout_seconds))
+    return results
+
+
 def provider_symbol(holding: Holding) -> str:
     symbol = holding.symbol.upper()
     market = holding.market.upper()
@@ -75,6 +130,28 @@ def provider_symbol(holding: Holding) -> str:
         if symbol.endswith(".BSE"):
             return f"{symbol.removesuffix('.BSE')}.BO"
     return symbol
+
+
+def _fetch_yahoo_fx_rate(currency: str, base_currency: str, timeout_seconds: int) -> FxRateResult:
+    direct_symbol = f"{currency}{base_currency}=X"
+    inverse_symbol = f"{base_currency}{currency}=X"
+    try:
+        direct_rate = _fetch_yahoo_price(direct_symbol, timeout_seconds=timeout_seconds)
+        if direct_rate is not None:
+            return FxRateResult(currency, base_currency, direct_rate, direct_symbol, "ok")
+        inverse_rate = _fetch_yahoo_price(inverse_symbol, timeout_seconds=timeout_seconds)
+        if inverse_rate is not None:
+            return FxRateResult(currency, base_currency, Decimal("1") / inverse_rate, inverse_symbol, "ok")
+        return FxRateResult(
+            currency,
+            base_currency,
+            None,
+            direct_symbol,
+            "not_found",
+            "Yahoo did not return a usable FX rate.",
+        )
+    except (HTTPError, URLError, TimeoutError, socket.timeout, OSError, json.JSONDecodeError) as exc:
+        return FxRateResult(currency, base_currency, None, direct_symbol, "error", str(exc))
 
 
 def _fetch_yahoo_prices(holdings: list[Holding], timeout_seconds: int) -> list[PriceResult]:

@@ -46,7 +46,29 @@ def _output_currency(report: dict[str, Any]) -> str:
 
 
 def _currency_symbol(currency: str) -> str:
-    return {"USD": "$", "INR": "INR"}.get(currency.upper(), currency.upper())
+    labels = {
+        "USD": "$",
+        "EUR": "€",
+        "GBP": "£",
+        "JPY": "¥",
+        "INR": "INR",
+        "CAD": "C$",
+        "AUD": "A$",
+        "CHF": "CHF",
+        "CNY": "CN¥",
+        "HKD": "HK$",
+        "SGD": "S$",
+        "NZD": "NZ$",
+        "SEK": "SEK",
+        "NOK": "NOK",
+        "KRW": "₩",
+        "AED": "AED",
+        "SAR": "SAR",
+        "ZAR": "ZAR",
+        "BRL": "R$",
+        "MXN": "MX$",
+    }
+    return labels.get(currency.upper(), currency.upper())
 
 
 def _currency_heading(label: str, report: dict[str, Any]) -> str:

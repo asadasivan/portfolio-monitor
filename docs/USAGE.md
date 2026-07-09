@@ -34,7 +34,7 @@ The report uses three holdings tables:
 - India MF and Stocks
 - Crypto
 
-`reports/latest.html` is the full human report. `reports/latest.ai.json` is intentionally compact and should be used only as assistant context to keep repeated daily runs low-token.
+`reports/latest.html` is the full human report. `reports/latest.ai.json` is intentionally compact and should be used only as assistant context to keep repeated daily runs low-token. See [Reports](REPORTS.md) for report files, checks, output currency, FX refresh, and interpretation details.
 
 ## Broker Total Checks
 
@@ -51,6 +51,8 @@ portfolio-monitor account-value "Fidelity" 1479869.13 --as-of 2026-07-09
 ```
 
 Use the account label shown in the report, such as `Robinhood`, `Fidelity`, or `Sift Capital`.
+
+See [Reports](REPORTS.md#broker-total-check) for detailed status meanings and reconciliation behavior.
 
 ## 4. Ask the Assistant to Run the Loop
 
@@ -92,6 +94,8 @@ The assistant should provide:
 - `reports/latest.html`: the primary user-facing report, with sorting, searching, and filtering.
 - A concise summary of portfolio value, performance, reconciliation, data quality, risk alerts, largest positions, and notable gain/loss changes.
 - Any follow-up files or values needed from you, such as manual prices, cost basis, or broker-reported totals.
+
+See [Reports](REPORTS.md) for the full report artifact list and output-currency behavior.
 
 ## Guardrails
 

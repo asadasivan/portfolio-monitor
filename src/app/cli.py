@@ -12,6 +12,7 @@ from app.settings import database_path, load_config, report_dir
 from app.ingestion import load_holdings
 from app.ingestion.pdf_importer import load_pdf_income_summaries
 from app.market_data import fetch_current_prices
+from app.market_data.online import SUPPORTED_FX_CURRENCIES, fetch_fx_rates
 from app.reporting import write_compact_report, write_html_report, write_markdown_report
 from app.persistence import PortfolioStore
 
@@ -52,6 +53,10 @@ def main() -> None:
     refresh_parser = subparsers.add_parser("refresh-prices", help="Fetch current prices online")
     refresh_parser.add_argument("--provider", default=None, help="Online price provider, for example yahoo")
     refresh_parser.add_argument("--timeout", type=int, default=6, help="Seconds to wait per symbol")
+
+    fx_parser = subparsers.add_parser("refresh-fx", help="Fetch live FX rates for configured report currencies")
+    fx_parser.add_argument("--provider", default=None, help="Online FX provider, for example yahoo")
+    fx_parser.add_argument("--timeout", type=int, default=6, help="Seconds to wait per currency pair")
 
     subparsers.add_parser("holdings", help="List portfolio holdings")
 
@@ -97,6 +102,8 @@ def main() -> None:
             _set_account_value(store, args.account, args.value, args.as_of, args.currency)
         elif args.command == "refresh-prices":
             _refresh_prices(store, config, args.provider, args.timeout)
+        elif args.command == "refresh-fx":
+            _refresh_fx_rates(config, args.provider, args.timeout, store=store)
         elif args.command == "holdings":
             _print_holdings(store)
         elif args.command == "analyze":
@@ -195,6 +202,9 @@ def _daily_loop(store: PortfolioStore, config: dict, input_path: Path, provider:
     failed_prices = _refresh_prices(store, config, provider, timeout)
     if failed_prices:
         print("Some online price refreshes failed. Provide a manual price CSV for the failed symbols if needed.")
+    failed_fx = _refresh_fx_rates(config, provider, timeout, store=store)
+    if failed_fx:
+        print("Some live FX refreshes failed. Existing configured FX rates were kept for failed currencies.")
     report_date = date.today()
     account_values = store.latest_account_values()
     current_value_accounts = _current_value_accounts(account_values, report_date)
@@ -328,6 +338,68 @@ def _set_account_value(store: PortfolioStore, account: str, value: str, as_of: s
     as_of_date = date.fromisoformat(as_of) if as_of else date.today()
     store.upsert_account_value(account, Decimal(value.replace(",", "")), as_of_date, currency)
     print(f"Set account value: {account}={value} {currency} as_of={as_of_date.isoformat()}")
+
+
+def _base_currency(config: dict) -> str:
+    return str(config.get("base_currency", "USD")).upper()
+
+
+def _configured_fx_currencies(config: dict) -> set[str]:
+    conversion = config.get("currency_conversion", {})
+    rates = conversion.get("rates_to_base", {}) if isinstance(conversion, dict) else {}
+    if not isinstance(rates, dict):
+        return set()
+    return {str(currency).upper() for currency in rates}
+
+
+def _output_currency(config: dict) -> str | None:
+    reporting = config.get("reporting", {})
+    if isinstance(reporting, dict) and reporting.get("output_currency"):
+        return str(reporting["output_currency"]).upper()
+    return None
+
+
+def _fx_currencies(config: dict, store: PortfolioStore | None = None) -> set[str]:
+    currencies = _configured_fx_currencies(config)
+    output_currency = _output_currency(config)
+    if output_currency:
+        currencies.add(output_currency)
+    if store is not None:
+        currencies.update(str(holding.currency).upper() for holding in store.active_holdings())
+        currencies.update(str(value.get("currency", "")).upper() for value in store.latest_account_values().values() if isinstance(value, dict))
+    return {currency for currency in currencies if currency}
+
+
+def _refresh_fx_rates(config: dict, provider: str | None, timeout: int, store: PortfolioStore | None = None) -> int:
+    base_currency = _base_currency(config)
+    currencies = _fx_currencies(config, store) | {base_currency}
+    provider_name = provider or config.get("market_data", {}).get("provider", "yahoo")
+    results = fetch_fx_rates(base_currency, currencies, f"{provider_name}:{timeout}")
+    conversion = config.setdefault("currency_conversion", {})
+    if not isinstance(conversion, dict):
+        conversion = {}
+        config["currency_conversion"] = conversion
+    rates = conversion.setdefault("rates_to_base", {})
+    if not isinstance(rates, dict):
+        rates = {}
+        conversion["rates_to_base"] = rates
+
+    updated = 0
+    failures = []
+    for result in results:
+        if result.status == "ok" and result.rate_to_base is not None:
+            rates[result.currency] = result.rate_to_base
+            updated += 1
+        else:
+            failures.append(result)
+
+    print(f"Fetched FX rates with {provider_name}. Updated={updated}, failed={len(failures)}.")
+    for failure in failures:
+        print(
+            f"  {failure.currency}/{failure.base_currency} ({failure.provider_symbol}): "
+            f"{failure.status} - {failure.message or 'no detail'}"
+        )
+    return len(failures)
 
 
 def _refresh_prices(store: PortfolioStore, config: dict, provider: str | None, timeout: int) -> int:
