@@ -191,7 +191,7 @@ def _summary(report: dict[str, Any]) -> str:
         ("As of", report.get("as_of", "n/a"), ""),
         (_currency_heading("Portfolio Value", report), _display_money(report.get("portfolio_value"), report), ""),
     ]
-    if isinstance(fx_revaluation, dict) and fx_revaluation.get("status") == "changed":
+    if isinstance(fx_revaluation, dict) and fx_revaluation.get("market_daily_change") is not None:
         cards.extend(
             [
                 (

@@ -15,7 +15,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Portfolio value: {money(report.get('portfolio_value'))}",
         f"- Holdings value: {money(report.get('holdings_value'))}",
     ]
-    if isinstance(fx_revaluation, dict) and fx_revaluation.get("status") == "changed":
+    if isinstance(fx_revaluation, dict) and fx_revaluation.get("market_daily_change") is not None:
         lines.extend(
             [
                 f"- Market daily change: {money(fx_revaluation.get('market_daily_change'))} ({pct(fx_revaluation.get('market_daily_change_pct'))})",

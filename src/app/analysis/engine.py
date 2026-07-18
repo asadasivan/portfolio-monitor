@@ -211,18 +211,12 @@ def _fx_revaluation_summary(
         and current_rates.get(currency) is not None
         and previous_rates[currency] != current_rates[currency]
     )
-    if not changed_currencies:
-        return {
-            "status": "unchanged",
-            "provider": refresh.get("provider") if isinstance(refresh, dict) else None,
-            "changed_currencies": changed_currencies,
-        }
     previous_fx_total = _total_value_with_rates(holdings, applicable_account_values, config, previous_rates)
     fx_impact = total - previous_fx_total
     market_daily_change = daily_change - fx_impact if daily_change is not None else None
     market_daily_change_pct = (market_daily_change / previous_total) * Decimal("100") if market_daily_change is not None and previous_total else None
     return {
-        "status": "changed",
+        "status": "changed" if changed_currencies else "unchanged",
         "provider": refresh.get("provider") if isinstance(refresh, dict) else None,
         "changed_currencies": changed_currencies,
         "previous_value_at_old_fx": previous_fx_total,

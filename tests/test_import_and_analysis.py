@@ -634,6 +634,43 @@ def test_daily_report_splits_fx_revaluation_from_market_change(tmp_path: Path) -
     assert '<div class="value negative">-15.00 (-12.50%)</div>' in html
 
 
+def test_daily_report_shows_fx_split_when_fx_rates_are_unchanged(tmp_path: Path) -> None:
+    holding = Holding(
+        account="Taxable Account",
+        broker="Broker A",
+        market="US",
+        symbol="TEST",
+        name="Test Holding",
+        asset_type="Stock",
+        quantity=Decimal("10"),
+        cost_basis=Decimal("90"),
+        current_price=Decimal("12"),
+        currency="USD",
+        sector="Technology",
+        statement_date=date(2026, 7, 18),
+        annual_dividend_per_share=Decimal("0"),
+    )
+    config = {
+        "base_currency": "USD",
+        "currency_conversion": {"rates_to_base": {"USD": Decimal("1")}},
+        "_fx_refresh": {
+            "provider": "yahoo",
+            "previous_rates_to_base": {"USD": Decimal("1")},
+            "rates_to_base": {"USD": Decimal("1")},
+            "changed_currencies": [],
+        },
+    }
+
+    report = build_daily_report([holding], Decimal("100"), config)
+    html = write_html_report(report, tmp_path).read_text(encoding="utf-8")
+
+    assert report["fx_revaluation"]["status"] == "unchanged"
+    assert report["fx_revaluation"]["fx_impact"] == Decimal("0")
+    assert report["fx_revaluation"]["market_daily_change"] == Decimal("20")
+    assert "Market Daily Change ($)" in html
+    assert "FX Revaluation ($)" in html
+
+
 def test_html_report_supports_common_output_currency_labels(tmp_path: Path) -> None:
     config = _config()
     config["base_currency"] = "USD"

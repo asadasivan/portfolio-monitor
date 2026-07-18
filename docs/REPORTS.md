@@ -34,7 +34,7 @@ When live FX rates change during a daily run, the report separates portfolio mov
 - **FX Revaluation**: change caused by revaluing non-base-currency holdings or broker totals with refreshed FX rates.
 - **Total Change After FX**: total change versus the prior saved snapshot after applying refreshed FX rates.
 
-This avoids presenting an FX-rate revaluation as if it were pure market performance. If FX rates do not change during the run, the report shows the normal **Daily Change** card.
+This avoids presenting an FX-rate revaluation as if it were pure market performance. When FX baseline data is available, the report still shows the market/FX split even if FX revaluation is zero; if the baseline is unavailable, it falls back to the normal **Daily Change** card.
 
 ## Report Checks
 
