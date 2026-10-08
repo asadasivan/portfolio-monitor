@@ -4,7 +4,7 @@ Use Portfolio Monitor through a local AI coding assistant. The assistant sets up
 
 ## 1. Create the Project
 
-In your AI assistant, create or open a local project/workspace. Then ask it to run setup:
+Install [`uv`](https://docs.astral.sh/uv/) first. In your AI assistant, create or open a local project/workspace. Then ask it to run setup:
 
 ```bash
 git clone https://github.com/asadasivan/portfolio-monitor.git && cd portfolio-monitor && make setup
@@ -47,8 +47,8 @@ Broker total checks are intentionally date-aware:
 - If an imported statement is older than today, provide the current broker/app total by looking at the brokerage account before relying on reconciliation:
 
 ```bash
-portfolio-monitor account-value "Robinhood" 55645.07 --as-of 2026-07-09
-portfolio-monitor account-value "Fidelity" 1479869.13 --as-of 2026-07-09
+uv run portfolio-monitor account-value "Robinhood" 55645.07 --as-of 2026-07-09
+uv run portfolio-monitor account-value "Fidelity" 1479869.13 --as-of 2026-07-09
 ```
 
 Use the account label shown in the report, such as `Robinhood`, `Fidelity`, or `Sift Capital`.

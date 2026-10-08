@@ -58,9 +58,9 @@ Broker reconciliation is date-aware:
 Example:
 
 ```bash
-portfolio-monitor account-value "Robinhood" 55645.07 --as-of 2026-07-09
-portfolio-monitor account-value "Fidelity" 1479869.13 --as-of 2026-07-09
-portfolio-monitor analyze --daily
+uv run portfolio-monitor account-value "Robinhood" 55645.07 --as-of 2026-07-09
+uv run portfolio-monitor account-value "Fidelity" 1479869.13 --as-of 2026-07-09
+uv run portfolio-monitor analyze --daily
 ```
 
 Use the account label shown in the report, such as `Robinhood`, `Fidelity`, or `Sift Capital`.
@@ -118,7 +118,7 @@ If live FX refresh fails for a currency, the report keeps the configured fallbac
 You can refresh FX rates directly:
 
 ```bash
-portfolio-monitor refresh-fx
+uv run portfolio-monitor refresh-fx
 ```
 
 ## Disclaimer

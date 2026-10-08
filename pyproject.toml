@@ -13,10 +13,12 @@ license = "MIT"
 dependencies = [
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "pytest>=8.0.0",
 ]
+
+[project.optional-dependencies]
 excel = [
   "openpyxl>=3.1.2",
 ]

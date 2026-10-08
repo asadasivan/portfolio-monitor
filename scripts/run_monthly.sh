@@ -1,12 +1,16 @@
 #!/usr/bin/env sh
 set -eu
 
-if [ -x ".venv/bin/portfolio-monitor" ]; then
-  PORTFOLIO_MONITOR=".venv/bin/portfolio-monitor"
-else
-  PORTFOLIO_MONITOR="portfolio-monitor"
-fi
+run_portfolio_monitor() {
+  if command -v uv >/dev/null 2>&1; then
+    uv run portfolio-monitor "$@"
+  elif [ -x ".venv/bin/portfolio-monitor" ]; then
+    .venv/bin/portfolio-monitor "$@"
+  else
+    portfolio-monitor "$@"
+  fi
+}
 
-"$PORTFOLIO_MONITOR" analyze --monthly
-"$PORTFOLIO_MONITOR" report --json
+run_portfolio_monitor analyze --monthly
+run_portfolio_monitor report --json
 printf '\nHTML report: reports/latest.html\n'

@@ -1,17 +1,24 @@
-.PHONY: setup test compile clean check-public
+.PHONY: setup sync lock test compile clean check-public
 
-PYTHON ?= python3
+UV ?= uv
+UV_EXTRAS ?= --extra pdf --extra excel
+UV_CACHE_DIR ?= .uv-cache
 
 setup:
-	$(PYTHON) -m venv .venv
-	. .venv/bin/activate && pip install --upgrade pip && pip install -e ".[dev,pdf,excel]"
+	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --group dev $(UV_EXTRAS)
 	test -f config/user.yaml || cp config/default.yaml config/user.yaml
 
+sync:
+	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --group dev $(UV_EXTRAS)
+
+lock:
+	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) lock
+
 test:
-	. .venv/bin/activate && pytest
+	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) run --no-sync pytest
 
 compile:
-	. .venv/bin/activate && python -m compileall src/app tests
+	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) run --no-sync python -m compileall src/app tests
 
 clean:
 	find . -name "__pycache__" -type d -prune -exec rm -rf {} +

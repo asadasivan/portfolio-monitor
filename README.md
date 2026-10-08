@@ -25,7 +25,7 @@ The primary workflow is: create a local project in your AI assistant, place your
 
 ## Start Here
 
-Use the [AI Assistant Usage Guide](docs/USAGE.md). It contains the setup command, the assistant prompt, and the expected output.
+Install [`uv`](https://docs.astral.sh/uv/) first, then use the [AI Assistant Usage Guide](docs/USAGE.md). It contains the setup command, the assistant prompt, and the expected output.
 
 ## Documentation
 

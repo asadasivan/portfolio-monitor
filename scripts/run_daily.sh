@@ -7,10 +7,14 @@ fi
 
 mkdir -p data reports
 
-if [ -x ".venv/bin/portfolio-monitor" ]; then
-  PORTFOLIO_MONITOR=".venv/bin/portfolio-monitor"
-else
-  PORTFOLIO_MONITOR="portfolio-monitor"
-fi
+run_portfolio_monitor() {
+  if command -v uv >/dev/null 2>&1; then
+    uv run portfolio-monitor "$@"
+  elif [ -x ".venv/bin/portfolio-monitor" ]; then
+    .venv/bin/portfolio-monitor "$@"
+  else
+    portfolio-monitor "$@"
+  fi
+}
 
-"$PORTFOLIO_MONITOR" daily-loop input
+run_portfolio_monitor daily-loop input

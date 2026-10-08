@@ -50,9 +50,8 @@ If multiple accounts hold the same symbol, include `broker` and `market` exactly
 Import command:
 
 ```bash
-. .venv/bin/activate
-portfolio-monitor cost-basis input/cost_basis.csv
-portfolio-monitor analyze --daily
+uv run portfolio-monitor cost-basis input/cost_basis.csv
+uv run portfolio-monitor analyze --daily
 ```
 
 ## Manual Price CSV
@@ -67,7 +66,7 @@ BTC,GLOBAL,67250
 Import command:
 
 ```bash
-portfolio-monitor prices input/prices.csv
+uv run portfolio-monitor prices input/prices.csv
 ```
 
 ## Indian MF PDFs
@@ -96,8 +95,7 @@ Reports convert INR holdings into the configured `base_currency` for totals, all
 Use broker-reported account totals to compare the tool's calculated value against the brokerage app or statement. This does not change holdings; it only adds a control check.
 
 ```bash
-. .venv/bin/activate
-portfolio-monitor account-value "Brokerage Account" 100000 --as-of 2026-07-06
-portfolio-monitor account-value "Trading Account" 25000 --as-of 2026-07-06
-portfolio-monitor analyze --daily
+uv run portfolio-monitor account-value "Brokerage Account" 100000 --as-of 2026-07-06
+uv run portfolio-monitor account-value "Trading Account" 25000 --as-of 2026-07-06
+uv run portfolio-monitor analyze --daily
 ```
